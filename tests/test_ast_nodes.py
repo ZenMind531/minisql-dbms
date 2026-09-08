@@ -55,6 +55,12 @@ class ASTNodeTests(unittest.TestCase):
                 type_spec=TypeSpec(TypeKind.BOOL),
             )
 
+    def test_type_spec_rejects_invalid_varchar_lengths_directly(self) -> None:
+        for length in (None, 0, 256):
+            with self.subTest(length=length):
+                with self.assertRaisesRegex(ValueError, "VARCHAR length"):
+                    TypeSpec(TypeKind.VARCHAR, length=length)
+
 
     def test_float_literal_is_representable_without_becoming_a_column_type(self) -> None:
         literal = LiteralExpr(
@@ -67,6 +73,24 @@ class ASTNodeTests(unittest.TestCase):
         self.assertEqual(literal.value, 3.5)
         self.assertIs(literal.literal_kind, LiteralKind.FLOAT)
         self.assertIsNone(literal.resolved_type)
+
+    def test_literal_value_must_match_its_literal_kind(self) -> None:
+        invalid_literals = [
+            ("12", LiteralKind.INTEGER),
+            (True, LiteralKind.INTEGER),
+            (3, LiteralKind.FLOAT),
+            (3.5, LiteralKind.STRING),
+        ]
+
+        for value, literal_kind in invalid_literals:
+            with self.subTest(value=value, literal_kind=literal_kind):
+                with self.assertRaisesRegex(ValueError, "literal value"):
+                    LiteralExpr(
+                        line=1,
+                        column=1,
+                        value=value,
+                        literal_kind=literal_kind,
+                    )
 
 
     def test_unary_minus_is_a_separate_normalized_ast_node(self) -> None:
@@ -149,7 +173,7 @@ class ASTNodeTests(unittest.TestCase):
         line=2,
         column=1,
         table="student",
-        target_columns=["id"],
+        columns=["id"],
         values=[one],
     )
         select = SelectStmt(
@@ -167,7 +191,7 @@ class ASTNodeTests(unittest.TestCase):
     )
 
         self.assertEqual(create.columns, [column])
-        self.assertEqual(insert.target_columns, ["id"])
+        self.assertEqual(insert.columns, ["id"])
         self.assertEqual(insert.values, [one])
         self.assertIs(select.where, predicate)
         self.assertIs(delete.where, predicate)
