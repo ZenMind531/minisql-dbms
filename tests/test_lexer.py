@@ -51,6 +51,40 @@ class LexerBasicTests(unittest.TestCase):
             ],
         )
 
+    def test_tokenizes_integer_float_and_escaped_string_constants(self) -> None:
+        tokens = Lexer("VALUES (12, 3.5, 'Tom''s book');").tokenize()
+        constants = [token for token in tokens if token.type is TokenType.CONST]
+
+        self.assertEqual(
+            [(token.lexeme, token.line, token.column) for token in constants],
+            [
+                ("12", 1, 9),
+                ("3.5", 1, 13),
+                ("'Tom''s book'", 1, 18),
+            ],
+        )
+
+    def test_uses_longest_match_for_operators(self) -> None:
+        tokens = Lexer("= != > >= < <= + - * /").tokenize()
+
+        self.assertEqual(
+            [token.lexeme for token in tokens if token.type is TokenType.OPERATOR],
+            ["=", "!=", ">", ">=", "<", "<=", "+", "-", "*", "/"],
+        )
+
+    def test_skips_line_and_block_comments_while_tracking_positions(self) -> None:
+        tokens = Lexer("-- hidden\r\nSELECT/*block\ncomment*/name;").tokenize()
+
+        self.assertEqual(
+            [(token.lexeme, token.line, token.column) for token in tokens],
+            [
+                ("SELECT", 2, 1),
+                ("name", 3, 10),
+                (";", 3, 14),
+                ("", 3, 15),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

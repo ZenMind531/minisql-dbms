@@ -54,10 +54,11 @@ class TypeSpec:
     length: int | None = None
 
     def __post_init__(self) -> None:
-        if self.kind is not TypeKind.VARCHAR and self.length is not None:
+        if self.kind is TypeKind.VARCHAR:
+            if self.length is None or not 1 <= self.length <= 255:
+                raise ValueError("VARCHAR length must be between 1 and 255")
+        elif self.length is not None:
             raise ValueError(f"{self.kind.value} type must not have a length")
-        if self.length is not None and self.length < 0:
-            raise ValueError("VARCHAR length must not be negative")
 
 
 @dataclass(slots=True, kw_only=True)
@@ -85,6 +86,19 @@ class LiteralExpr(Expr):
     value: int | float | str
     literal_kind: LiteralKind
 
+    def __post_init__(self) -> None:
+        ASTNode.__post_init__(self)
+        value_matches_kind = {
+            LiteralKind.INTEGER: type(self.value) is int,
+            LiteralKind.FLOAT: type(self.value) is float,
+            LiteralKind.STRING: type(self.value) is str,
+        }
+        if not value_matches_kind[self.literal_kind]:
+            raise ValueError(
+                f"literal value {self.value!r} does not match "
+                f"{self.literal_kind.value}"
+            )
+
 
 @dataclass(slots=True, kw_only=True)
 class UnaryExpr(Expr):
@@ -108,11 +122,6 @@ class ColumnDef(ASTNode):
         ASTNode.__post_init__(self)
         if self.type_spec.kind not in (TypeKind.INT, TypeKind.VARCHAR):
             raise ValueError("column type must be INT or VARCHAR")
-        if self.type_spec.kind is TypeKind.VARCHAR and not (
-            self.type_spec.length is not None
-            and 1 <= self.type_spec.length <= 255
-        ):
-            raise ValueError("VARCHAR length must be between 1 and 255")
 
 
 @dataclass(slots=True, kw_only=True)
@@ -129,12 +138,12 @@ class CreateTableStmt(ASTNode):
 @dataclass(slots=True, kw_only=True)
 class InsertStmt(ASTNode):
     table: str
-    target_columns: list[str] | None
+    columns: list[str] | None
     values: list[Expr]
 
     def __post_init__(self) -> None:
         ASTNode.__post_init__(self)
-        if self.target_columns is not None and not self.target_columns:
+        if self.columns is not None and not self.columns:
             raise ValueError("INSERT target column list must not be empty")
         if not self.values:
             raise ValueError("INSERT requires at least one value")

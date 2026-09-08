@@ -11,15 +11,25 @@
 
 ### AST（docs/design.md 详述）
 - 语句节点：`CreateTableStmt(table, columns: [ColumnDef])` /
-  `InsertStmt(table, columns, values)` / `SelectStmt(columns, table, where)` /
+  `InsertStmt(table, columns: [str] | None, values)` /
+  `SelectStmt(columns: [str] | None, table, where)` /
   `DeleteStmt(table, where)`
 - 表达式节点：`BinaryExpr(op, left, right)` / `UnaryExpr(NOT, operand)` /
   `IdentifierExpr(name)` / `LiteralExpr(value, type)`
-- 所有节点带 `line, column`；语义阶段回填 `resolved_type`。
+- 所有节点带 `line, column`；复合表达式记录其整个源码片段的起始位置，
+  例如 `age > 18 AND ...` 的 AND 节点位置为 `age` 的位置；语义阶段回填
+  `resolved_type`。
+- `InsertStmt.columns=None` 表示省略目标列列表；`SelectStmt.columns=None`
+  表示 `SELECT *`，非空列表表示显式列名。
+- 字符串 `LiteralExpr.value` 不含外围引号，源码中的 `''` 解码为一个 `'`。
+- `LiteralExpr` 的 value 必须与 INTEGER/FLOAT/STRING 字面量种类匹配；FLOAT
+  可暂存在 AST，但当前语义阶段统一拒绝。
 
 ### Catalog（内存视图）
 - `TableSchema: { name, columns: [ {name, type: INT|VARCHAR, length: int|None} ], first_page }`
 - VARCHAR 长度范围为 1–255，按 UTF-8 字节数校验；INT 的 length 为 None。
+- `TypeSpec` 自身保证 VARCHAR 必须带 1–255 的长度，INT/BOOL 不得带长度；
+  BOOL 只可作为表达式结果类型，不可作为表列类型。
 - 接口：`create_table / find_table / find_column / get_type`（见 contracts/compiler-api.md）
 - 校验规则：表名/列名唯一；INSERT 列数、顺序、值类型与模式一致。
 
