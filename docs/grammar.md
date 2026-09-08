@@ -243,7 +243,9 @@ FLOAT_LITERAL       ::= digit { digit } "." digit { digit } ;
 - 正负号是独立运算符，不属于数字 Token，例如 `-12` 产生 `-` 与 INTEGER_LITERAL 两个 Token。
 - 浮点数的小数点两侧都必须至少有一位数字；`.5`、`1.` 不合法。
 - 数字后直接连接标识符字符（例如 `12abc`）视为非法数字，不拆分为两个合法 Token。
-- Lexer 识别 FLOAT_LITERAL；具体语句是否允许浮点值由后续类型检查决定。
+- Lexer 和 Parser 接受 FLOAT_LITERAL 并构造 AST，但当前 MiniSQL 没有 FLOAT
+  数据类型；SemanticAnalyzer 必须统一报告“不支持 FLOAT 类型”。FLOAT 不得
+  用作列类型，Executor 无需实现浮点运算。
 
 ### 8.4 字符串常量
 
