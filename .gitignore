@@ -1,0 +1,10 @@
+# Python 编译缓存
+__pycache__/
+*.pyc
+
+# 虚拟环境
+.venv/
+
+# 运行时数据（数据库文件）
+data/
+tmp/
