@@ -341,3 +341,34 @@ C 下一步：
 - [ ] `utils/helpers.py` 内容：等 B/D 说明需要哪些公共函数再填。
 - [ ] 与 D 的 StorageEngine 联调：D 的 `engine/` 尚未开始（2026-09-09 尚无该目录），需等 D 提供实现后对接。
 - [ ] T036 测试报告：最终集成并验收后整理。
+
+## 17. A（编译器前端）完成状态（2026-09-09）
+
+本节是组员 A 当前状态的最新事实；前文中“Parser 缺席”“Lexer 错误路径待补”
+等历史描述均已失效。
+
+- T009/T013：Lexer 已统一使用 `LexError` 报告非法字符、非法数字、未闭合
+  字符串和未闭合块注释，错误位置指向非法词素或未闭合结构的起点。
+- T010/T014：新增递归下降 `parser.py`，支持 CREATE TABLE、INSERT、SELECT、
+  DELETE、多语句和空输入；表达式层级与 `docs/grammar.md` 一一对应，支持
+  `NOT > 比较 > AND > OR`、算术优先级、左结合与括号。
+- Parser 对语法错误统一抛 `ParseError`，消息包含 actual Token 与 expected
+  集合；VARCHAR 长度必须是 1–255 的无符号整数。
+- Parser 对括号嵌套设置安全上限，超深输入报告 `ParseError`，不会泄漏
+  Python `RecursionError`。
+- T019：真实 Lexer 和 Parser 已接入 `compile_sql`/`--compile-only`，示例
+  `tests/sql/demo_compiler.sql` 可完整输出 Token、AST、语义检查、原始 Plan
+  与优化 Plan。
+- T020：`tests/sql/compiler_cases.json` 包含 34 个命名案例，覆盖正常、词法
+  错误、语法错误和语义错误，并由 `tests/test_sql_cases.py` 自动验证。
+- T035：新增根目录 `README.md` 和 `docs/design.md`，记录运行方式、Token、
+  AST、递归下降层级和错误边界。
+
+组员 A 相关新增测试为 Lexer 错误 6 项、Parser 16 项、SQL 案例集 3 项。
+完整标准库 unittest 回归为 **165 项通过**。当前工作区 Python 运行时未安装
+pytest，因此 `python -m pytest` 尚不能执行；unittest 用例兼容 pytest 收集。
+使用固定随机种子 `20260909` 生成 10,000 条长度 0–80 的随机输入，Lexer 与
+Parser 未出现 `LexError`/`ParseError` 以外的异常，意外崩溃数为 0。
+
+仓库当前跟踪了部分 `__pycache__/*.pyc` 文件。执行测试会改变这些生成文件，
+但它们不是源码变更，后续应由仓库维护者统一从版本控制中移除。

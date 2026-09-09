@@ -15,10 +15,9 @@ Two entry points, deliberately separated:
     Useful when the frontend is driven separately, and it is the part that
     works today.
 
-**Current dependency (A, T014).** ``parser.py`` does not exist yet. The
-pipeline resolves it lazily, and when it is missing it says so and stops after
-the Token stage rather than reporting a fake success. Nothing else needs to
-change once A lands the Parser.
+The Parser is resolved lazily so the demonstration module keeps a clear stage
+boundary. A missing frontend is still reported after the Token stage instead
+of being presented as a successful compilation.
 
 **Error handling.** Only the structured diagnostics from ``utils.errors``
 (``LexError``/``ParseError``/``SemanticError``) are caught and reported with
@@ -119,9 +118,8 @@ def compile_sql(source: str, catalog: Catalog | None = None, *,
     ``catalog`` defaults to an empty Catalog that ``CREATE TABLE`` statements
     in ``source`` populate as the demo proceeds.
 
-    The two factories exist so this pipeline is testable while A's Parser is
-    still missing; production callers leave them unset and get the real
-    Lexer and Parser.
+    The two factories isolate frontend stages in unit tests; production
+    callers leave them unset and get the real Lexer and Parser.
     """
     catalog = Catalog() if catalog is None else catalog
     build_lexer = Lexer if lexer_factory is None else lexer_factory
@@ -135,9 +133,8 @@ def compile_sql(source: str, catalog: Catalog | None = None, *,
     try:
         parser = build_parser(tokens)
     except ImportError:
-        # A's parser.py is not available yet (T014). Only resolving the
-        # Parser is guarded here, so an ImportError raised by parse() itself
-        # is not mistaken for a missing module.
+        # Only resolving Parser is guarded here, so an ImportError raised by
+        # parse() itself is not mistaken for a missing frontend module.
         return "\n".join([*_token_section(tokens), "", PARSER_PENDING])
 
     try:

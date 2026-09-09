@@ -1,6 +1,7 @@
 import unittest
 
 from database_system.sql_compiler.lexer import Lexer, Token, TokenType
+from database_system.utils.errors import LexError
 
 
 class LexerBasicTests(unittest.TestCase):
@@ -84,6 +85,39 @@ class LexerBasicTests(unittest.TestCase):
                 ("", 3, 15),
             ],
         )
+
+
+class LexerErrorTests(unittest.TestCase):
+    def assert_lex_error(self, source: str, line: int, column: int) -> LexError:
+        with self.assertRaises(LexError) as caught:
+            Lexer(source).tokenize()
+        self.assertEqual((caught.exception.line, caught.exception.column),
+                         (line, column))
+        return caught.exception
+
+    def test_rejects_illegal_character_at_its_position(self) -> None:
+        error = self.assert_lex_error("SELECT\n  @;", 2, 3)
+        self.assertIn("@", error.message)
+
+    def test_rejects_number_followed_by_identifier_characters(self) -> None:
+        error = self.assert_lex_error("VALUES (12abc);", 1, 9)
+        self.assertIn("12abc", error.message)
+
+    def test_rejects_decimal_without_digits_on_both_sides(self) -> None:
+        for source, column in [("VALUES (.5);", 9), ("VALUES (1.);", 9)]:
+            with self.subTest(source=source):
+                self.assert_lex_error(source, 1, column)
+
+    def test_unterminated_string_reports_opening_quote(self) -> None:
+        error = self.assert_lex_error("VALUES ('abc", 1, 9)
+        self.assertIn("string", error.message.lower())
+
+    def test_string_cannot_cross_a_physical_line(self) -> None:
+        self.assert_lex_error("VALUES ('abc\nxyz');", 1, 9)
+
+    def test_unterminated_block_comment_reports_comment_start(self) -> None:
+        error = self.assert_lex_error("SELECT 1;\n  /* missing", 2, 3)
+        self.assertIn("comment", error.message.lower())
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from database_system.utils.errors import LexError
+
 
 KEYWORDS = frozenset(
     {
@@ -68,6 +70,12 @@ class Lexer:
                 tokens.append(self._scan_word())
             elif "0" <= character <= "9":
                 tokens.append(self._scan_number())
+            elif character == "." and self._peek() is not None and self._peek().isdigit():
+                raise LexError(
+                    "invalid number: digits are required before the decimal point",
+                    line=self._line,
+                    column=self._column,
+                )
             elif character == "'":
                 tokens.append(self._scan_string())
             elif character in DELIMITERS:
@@ -80,8 +88,10 @@ class Lexer:
             elif character in ONE_CHARACTER_OPERATORS:
                 tokens.append(self._scan_operator(length=1))
             else:
-                raise NotImplementedError(
-                    f"tokenization for {character!r} is not implemented yet"
+                raise LexError(
+                    f"illegal character {character!r}",
+                    line=self._line,
+                    column=self._column,
                 )
 
         tokens.append(Token(TokenType.EOF, "", self._line, self._column))
@@ -129,6 +139,8 @@ class Lexer:
             self._advance()
 
     def _skip_block_comment(self) -> None:
+        start_line = self._line
+        start_column = self._column
         self._advance()
         self._advance()
 
@@ -136,7 +148,11 @@ class Lexer:
             self._advance()
 
         if self._at_end():
-            raise NotImplementedError("unterminated block comment error is pending LexError")
+            raise LexError(
+                "unterminated block comment",
+                line=start_line,
+                column=start_column,
+            )
 
         self._advance()
         self._advance()
@@ -165,15 +181,28 @@ class Lexer:
         while not self._at_end() and "0" <= self._current() <= "9":
             self._advance()
 
-        if (
-            not self._at_end()
-            and self._current() == "."
-            and self._peek() is not None
-            and "0" <= self._peek() <= "9"
-        ):
+        if not self._at_end() and self._current() == ".":
+            if self._peek() is None or not self._peek().isdigit():
+                self._advance()
+                lexeme = self.source[start_index : self._index]
+                raise LexError(
+                    f"invalid number {lexeme!r}: digits are required after the decimal point",
+                    line=start_line,
+                    column=start_column,
+                )
             self._advance()
             while not self._at_end() and "0" <= self._current() <= "9":
                 self._advance()
+
+        if not self._at_end() and self._is_identifier_start(self._current()):
+            while not self._at_end() and self._is_identifier_part(self._current()):
+                self._advance()
+            lexeme = self.source[start_index : self._index]
+            raise LexError(
+                f"invalid number {lexeme!r}: a number cannot be followed by an identifier",
+                line=start_line,
+                column=start_column,
+            )
 
         lexeme = self.source[start_index : self._index]
         return Token(TokenType.CONST, lexeme, start_line, start_column)
@@ -186,7 +215,11 @@ class Lexer:
 
         while not self._at_end():
             if self._current() in "\r\n":
-                raise NotImplementedError("multiline string error is pending LexError")
+                raise LexError(
+                    "unterminated string literal before end of line",
+                    line=start_line,
+                    column=start_column,
+                )
             if self._current() != "'":
                 self._advance()
                 continue
@@ -199,7 +232,11 @@ class Lexer:
             lexeme = self.source[start_index : self._index]
             return Token(TokenType.CONST, lexeme, start_line, start_column)
 
-        raise NotImplementedError("unterminated string error is pending LexError")
+        raise LexError(
+            "unterminated string literal",
+            line=start_line,
+            column=start_column,
+        )
 
     def _scan_operator(self, *, length: int) -> Token:
         start_index = self._index
