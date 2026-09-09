@@ -224,3 +224,34 @@ T012 的 18 项 Planner/Optimizer 测试全部通过；完整 unittest 回归共
 新增 `database_system/sql_compiler/demo.py`，提供 `render_compilation(tokens, statements, catalog)` 后端演示入口。它按顺序输出 Token 流、AST、语义检查结果、原始 Logical Plan 和优化后的 Logical Plan；语义错误会显示带位置的错误信息并继续处理后续语句，便于课堂演示成功与失败路径。
 
 T019 的演示入口依赖 A 提供的 Token 列表和 Parser 产出的 AST，不负责词法或语法分析，也不执行磁盘读写。Planner、Optimizer 和 SemanticAnalyzer 分别复用现有实现。新增 `tests/test_demo.py` 覆盖完整成功流程和语义错误继续处理流程；完整 unittest 回归共 79 项通过。
+
+## 15. C（存储）状态补充（2026-09-09）
+
+已完成 Page / FileManager / BufferPool 及测试，存储模块（US2）可独立交付。测试入口：
+
+```powershell
+python -m pytest tests/test_storage.py tests/test_buffer.py -v
+```
+
+存储测试共 **10 项通过**（Python 3.11.9 + pytest）。
+
+| 文件 | 作用 | 状态 |
+|------|------|------|
+| `database_system/utils/constants.py` | `PAGE_SIZE = 4096` | 完成（T007） |
+| `database_system/utils/helpers.py` | 空占位 | 待组内确认内容 |
+| `database_system/storage/page.py` | 4KB slotted page：页头 32B，槽数组(前)/行数据(尾)，insert/get/delete/rows/to_bytes/from_bytes | 完成（T021/T023） |
+| `database_system/storage/file_manager.py` | 每表 `.dat`，页 0 文件头，allocate/free/read/write_page，空闲链表 | 完成（T024） |
+| `database_system/storage/buffer.py` | LRU/FIFO 缓冲池（OrderedDict），pin/dirty、命中统计、logging | 完成（T022/T025） |
+| `tests/test_storage.py` | Page 行为 + 文件读写/释放复用 | 6 项通过 |
+| `tests/test_buffer.py` | LRU/FIFO 淘汰 / pin 保护 / 脏页写回 | 4 项通过 |
+
+已确认的关键决定：
+- 页头固定 32B：page_id(u32) / page_type(u8) / slot_count(u16) / free_start(u16) / free_end(u16)；每槽 4B = offset(u16)+length(u16)。
+- FileManager 分配页时**直接写一个格式化好的空白数据页**——否则读回的新页 `free_end=0` 表现为“全满”，首次插行会失败；写空页同时保证释放页复用后旧数据不泄漏。
+- BufferPool 用 `OrderedDict`：LRU 命中 `move_to_end`，FIFO 保持插入序；被 pin 的页不淘汰；所有帧都被 pin 时抛 `StorageError`；脏页在淘汰/退出前写回。
+- 目前 `utils/errors.py` 还没有统一 `StorageError`，`buffer.py` 先做本地兜底定义；B 补上 `utils/errors.StorageError` 后即可改用统一类。
+- 存储层只处理字节，不感知 INT/VARCHAR/FLOAT 语义；行序列化由 D 的 StorageEngine 负责。
+
+C 下一步：
+- [ ] T026 持久化验证：写入 → 杀进程 → 重启 → 读回一致。
+- [ ] 与 D 的 StorageEngine 联调（FileManager/BufferPool 接口对接）。
