@@ -210,3 +210,17 @@ python -m pytest tests -v
 1. 实现 T018 `optimizer.py`，使 `tests/test_planner.py` 中的常量折叠、布尔化简和冗余节点测试可运行。
 2. 补齐 `LexError`、`ParseError` 等统一错误类型及 Parser，再接通 Lexer → Parser → SemanticAnalyzer → Planner 流水线。
 3. 根据执行器需求评审并冻结 Logical Plan 的具体字段，随后继续引擎和存储阶段。
+
+## 13. T018 状态补充（2026-09-09）
+
+已完成 `database_system/sql_compiler/optimizer.py`。`Optimizer.optimize()` 对计划做深拷贝后递归应用三类规则：整数常量折叠（包括算术和比较）、`AND`/`OR` 的真假值化简，以及恒真 Filter 和 `Project(*)` 冗余节点消除。优化保留 Delete 的目标表和扫描子树，不增加计划节点数量；恒假 Filter 保留为恒假谓词以保持删除/筛选语义。
+
+T012 的 18 项 Planner/Optimizer 测试全部通过；完整 unittest 回归共 77 项通过，`optimizer.py` 编译检查和 `git diff --check` 通过。当前工作区仍未安装 pytest。
+
+下一项编译器工作是实现 Parser 并补齐统一 `LexError`、`ParseError` 路径，然后联调完整 SQL 文本到 Logical Plan 的流水线。
+
+## 14. T019 状态补充（2026-09-09）
+
+新增 `database_system/sql_compiler/demo.py`，提供 `render_compilation(tokens, statements, catalog)` 后端演示入口。它按顺序输出 Token 流、AST、语义检查结果、原始 Logical Plan 和优化后的 Logical Plan；语义错误会显示带位置的错误信息并继续处理后续语句，便于课堂演示成功与失败路径。
+
+T019 的演示入口依赖 A 提供的 Token 列表和 Parser 产出的 AST，不负责词法或语法分析，也不执行磁盘读写。Planner、Optimizer 和 SemanticAnalyzer 分别复用现有实现。新增 `tests/test_demo.py` 覆盖完整成功流程和语义错误继续处理流程；完整 unittest 回归共 79 项通过。
