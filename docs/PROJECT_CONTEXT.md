@@ -255,3 +255,18 @@ python -m pytest tests/test_storage.py tests/test_buffer.py -v
 C 下一步：
 - [ ] T026 持久化验证：写入 → 杀进程 → 重启 → 读回一致。
 - [ ] 与 D 的 StorageEngine 联调（FileManager/BufferPool 接口对接）。
+
+## 16. C（存储）T026 补充（2026-09-09）
+
+完成 T026 持久化验证：
+
+- 新增 `tests/_persist_helper.py`（独立进程写库脚本）与 `tests/test_storage_persist.py`。
+- 测试逻辑：进程 1 写入 2 页数据后退出 → 进程 2 用新的 `FileManager` 打开同一文件 → 按页号读回，行内容一致；同时验证页 0 文件头（page_count / free 链表）跨进程正确恢复。
+- 结果：存储相关测试共 **11 项通过**（`python -m pytest tests/test_storage.py tests/test_buffer.py tests/test_storage_persist.py -v`，Python 3.11.9 + pytest）。
+
+接口核对（对照 `contracts/storage-api.md`）：`Page` / `FileManager` / `BufferPool` 的方法名、参数、返回语义均已对齐；`BufferPool` 支持 LRU/FIFO、pin/dirty、stats 统计；错误先用本地 `StorageError` 兜底，等 B 在 `utils/errors.py` 补上统一类后自动切换。
+
+**C 剩余项（依赖他人或收尾阶段，无法独立完成）**：
+- [ ] `utils/helpers.py` 内容：等 B/D 说明需要哪些公共函数再填。
+- [ ] 与 D 的 StorageEngine 联调：D 的 `engine/` 尚未开始（2026-09-09 尚无该目录），需等 D 提供实现后对接。
+- [ ] T036 测试报告：最终集成并验收后整理。
