@@ -1,6 +1,9 @@
 # MiniSQL SQL 子集文法
 
-本文档是 MiniSQL 语法分析器的唯一文法准绳。`lexer.py`、`parser.py`、AST 定义和相关测试必须与本文同步。本文只定义课程必做的 CREATE TABLE、INSERT、SELECT、DELETE；UPDATE、JOIN、ORDER BY、GROUP BY、NULL 等不在当前范围内。
+本文档是 MiniSQL 当前实现的 SQL 词法与语法准绳。`lexer.py`、`parser.py`、
+AST 定义和相关测试必须与本文同步。本文定义 CREATE TABLE、INSERT、SELECT、
+DELETE、SHOW，以及 SELECT 的多列 ORDER BY；UPDATE、JOIN、LIMIT、GROUP BY、
+NULL 等不在当前范围内。
 
 ## 1. 记号约定
 
@@ -26,7 +29,8 @@ statement_list      ::= statement ";" { statement ";" } ;
 statement           ::= create_table_statement
                       | insert_statement
                       | select_statement
-                      | delete_statement ;
+                      | delete_statement
+                      | show_statement ;
 ```
 
 规则说明：
@@ -94,10 +98,13 @@ INSERT INTO student VALUES (2, 'Bob', 17);
 
 ```ebnf
 select_statement    ::= SELECT select_list FROM IDENTIFIER
-                        [ WHERE expression ] ;
+                        [ WHERE expression ] [ order_by_clause ] ;
 
 select_list         ::= "*"
                       | identifier_list ;
+
+order_by_clause     ::= ORDER BY order_by_item { "," order_by_item } ;
+order_by_item       ::= IDENTIFIER [ ASC | DESC ] ;
 ```
 
 语法与边界：
@@ -106,15 +113,27 @@ select_list         ::= "*"
 - 投影项只能是 `*` 或一个非空列名列表，不支持在 SELECT 列表中书写任意表达式。
 - `WHERE` 后必须有表达式；该表达式最终必须具有 BOOL 类型，此规则由 SemanticAnalyzer 检查。
 - 表和列是否存在由 SemanticAnalyzer 检查。
+- ORDER BY 支持多个列；省略方向或 ASC 表示升序，DESC 表示降序。
+- 排序发生在投影之前，排序列可以不出现在 SELECT 列表中。
 
 示例：
 
 ```sql
 SELECT * FROM student;
 SELECT id, name FROM student WHERE age > 18 AND id != 3;
+SELECT name FROM student ORDER BY age DESC, name ASC;
 ```
 
-## 6. DELETE
+## 6. SHOW
+
+```ebnf
+show_statement      ::= SHOW DATABASES | SHOW TABLES ;
+```
+
+- SHOW DATABASES 显示当前 `--data` 目录名称。
+- SHOW TABLES 按名称升序显示用户表，不显示内部 `__catalog__`。
+
+## 7. DELETE
 
 ```ebnf
 delete_statement    ::= DELETE FROM IDENTIFIER [ WHERE expression ] ;
@@ -133,7 +152,7 @@ DELETE FROM student WHERE id = 1;
 DELETE FROM student;
 ```
 
-## 7. 表达式
+## 8. 表达式
 
 表达式从低到高的完整优先级为：
 
@@ -207,19 +226,20 @@ BinaryExpr(AND)
 
 Parser 只负责按文法构造 AST。诸如对 VARCHAR 使用算术运算、WHERE 结果不是 BOOL 等问题由 SemanticAnalyzer 按集中类型规则报告。
 
-## 8. 词法规则
+## 9. 词法规则
 
-### 8.1 关键字
+### 9.1 关键字
 
 ```text
 SELECT  FROM    WHERE   CREATE  TABLE
 INSERT  INTO    VALUES  DELETE  AND
 OR      NOT     INT     VARCHAR
+SHOW    DATABASES TABLES ORDER BY ASC DESC
 ```
 
 关键字匹配大小写不敏感，例如 `select`、`SELECT` 和 `SeLeCt` 产生同一种关键字 Token。标识符和字符串内容必须保留源码中的原始内容。
 
-### 8.2 标识符
+### 9.2 标识符
 
 ```ebnf
 IDENTIFIER          ::= identifier_start { identifier_part } ;
@@ -232,7 +252,7 @@ identifier_part     ::= letter | digit | "_" ;
 - 不支持带引号标识符。
 - 与关键字大小写无关匹配后，剩余符合规则的词素才产生 IDENTIFIER。
 
-### 8.3 数字常量
+### 9.3 数字常量
 
 ```ebnf
 INTEGER_LITERAL     ::= digit { digit } ;
@@ -247,7 +267,7 @@ FLOAT_LITERAL       ::= digit { digit } "." digit { digit } ;
   数据类型；SemanticAnalyzer 必须统一报告“不支持 FLOAT 类型”。FLOAT 不得
   用作列类型，Executor 无需实现浮点运算。
 
-### 8.4 字符串常量
+### 9.4 字符串常量
 
 ```ebnf
 STRING_LITERAL      ::= "'" { string_character | "''" } "'" ;
@@ -259,7 +279,7 @@ STRING_LITERAL      ::= "'" { string_character | "''" } "'" ;
 - 字符串不得跨越物理行；遇到换行或 EOF 仍未闭合时抛出 LexError。
 - 双引号字符串不在支持范围内。
 
-### 8.5 运算符与分隔符
+### 9.5 运算符与分隔符
 
 ```text
 运算符：=  !=  >  >=  <  <=  +  -  *  /
@@ -268,7 +288,7 @@ STRING_LITERAL      ::= "'" { string_character | "''" } "'" ;
 
 Lexer 必须采用最长匹配，因此 `>=`、`<=`、`!=` 各自产生单个 Token。单独的 `!` 非法。
 
-### 8.6 空白与注释
+### 9.6 空白与注释
 
 ```ebnf
 line_comment        ::= "--" { any_character_except_newline }
@@ -283,9 +303,9 @@ block_comment       ::= "/*" { block_comment_character } "*/" ;
 - EOF 前未找到 `*/` 时抛出 LexError，位置指向注释起始处。
 - 注释标记出现在字符串中时只是字符串内容。
 
-## 9. 错误要求
+## 10. 错误要求
 
-### 9.1 词法错误
+### 10.1 词法错误
 
 Lexer 遇到非法字符、非法数字、未闭合字符串或未闭合块注释时，必须抛出统一的 `LexError`。错误包含：
 
@@ -296,7 +316,7 @@ Lexer 遇到非法字符、非法数字、未闭合字符串或未闭合块注�
 
 Lexer 不得吞掉非法字符或用 UNKNOWN Token 继续伪装成功。
 
-### 9.2 语法错误
+### 10.2 语法错误
 
 Parser 遇到不符合本文文法的 Token 时，必须抛出统一的 `ParseError`。错误包含：
 
@@ -313,7 +333,7 @@ SELECT name FROM student WHERE age > 18 AND;
 
 Parser 在 `;` 处报告错误，expected 集合应包含可开始一元或基本表达式的 Token，例如 `NOT`、`+`、`-`、`IDENTIFIER`、INTEGER_LITERAL、FLOAT_LITERAL、STRING_LITERAL、`(`。
 
-### 9.3 语法与语义的边界
+### 10.3 语法与语义的边界
 
 Parser 只判断 Token 序列是否符合本文文法。以下问题交给 SemanticAnalyzer：
 
@@ -324,26 +344,33 @@ Parser 只判断 Token 序列是否符合本文文法。以下问题交给 Seman
 - WHERE 表达式结果不是 BOOL。
 - VARCHAR 值按 UTF-8 编码后的字节数超过列定义长度。
 
-## 10. Parser 实现映射
+## 11. Parser 实现映射
 
-递归下降 Parser 应让函数层次直接对应文法层次，建议至少包含：
+当前递归下降 Parser 的函数层次与文法直接对应：
 
 ```text
 parse
-parse_statement
-parse_create_table
-parse_insert
-parse_select
-parse_delete
-parse_expression
-parse_or
-parse_and
-parse_comparison
-parse_not
-parse_additive
-parse_multiplicative
-parse_unary
-parse_primary
+_parse_statement
+_parse_create_table
+_parse_column_definition
+_parse_type_specification
+_parse_insert
+_parse_select
+_parse_delete
+_parse_show
+_parse_order_by
+_parse_order_item
+_parse_identifier_list
+_parse_expression_list
+_parse_expression
+_parse_or_expression
+_parse_and_expression
+_parse_comparison_expression
+_parse_not_expression
+_parse_additive_expression
+_parse_multiplicative_expression
+_parse_unary_expression
+_parse_primary_expression
 ```
 
 不得用与本文优先级不同的通用解析捷径。若修改任何产生式，必须在同一次变更中同步更新 Parser、AST（如受影响）和对应测试；涉及冻结 Token/AST 契约时，先取得规定的评审同意。

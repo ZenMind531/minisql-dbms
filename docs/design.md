@@ -22,10 +22,12 @@ Lexer 不判断语句结构，Parser 不查询 Catalog，也不进行类型检�
 
 ## AST
 
-语句节点为 `CreateTableStmt`、`InsertStmt`、`SelectStmt`、`DeleteStmt`。表达式
-节点为 `IdentifierExpr`、`LiteralExpr`、`UnaryExpr`、`BinaryExpr`。
+语句节点为 `CreateTableStmt`、`InsertStmt`、`SelectStmt`、`DeleteStmt`、
+`ShowDatabasesStmt`、`ShowTablesStmt`。表达式节点为 `IdentifierExpr`、
+`LiteralExpr`、`UnaryExpr`、`BinaryExpr`。
 
 - `SelectStmt.columns=None` 表示 `SELECT *`。
+- `SelectStmt.order_by` 保存有序的 `OrderByItem` 列表；每项记录列名及是否降序。
 - `InsertStmt.columns=None` 表示省略目标列列表。
 - 字符串 AST 值去掉外围引号，并将 `''` 解码为 `'`。
 - 正负号使用 UnaryExpr 表示，不属于数字 Token。
@@ -52,6 +54,22 @@ expression
 括号重新进入 `expression`，覆盖默认优先级。嵌套深度设有安全上限，过深输入
 报告 `ParseError`，不会泄漏 Python `RecursionError`。
 
+## SHOW 与排序计划
+
+`SHOW DATABASES` 显示当前 `--data` 目录名称；`SHOW TABLES` 显示按名称升序排列
+的用户表，并隐藏内部 `__catalog__` 表。SHOW 节点保持独立，后续增加多数据库
+切换时可以扩展目录提供者，而无需改变现有语法。
+
+SELECT 的 ORDER BY 支持多列，每列可独立使用 `ASC`、`DESC`，省略方向时默认
+为 `ASC`。排序计划位于投影之前：
+
+```text
+Project → Sort → Filter（可选）→ SeqScan
+```
+
+因此排序列不必出现在 SELECT 列表中。执行器从最后一个排序键向前进行稳定排序，
+从而保持 SQL 中从左到右的排序优先级。
+
 ## 错误处理
 
 Lexer 对非法字符、非法数字、未闭合字符串和块注释抛 `LexError`。Parser 对
@@ -62,6 +80,9 @@ Token 的行列号，ParseError 消息同时包含 actual Token 和 expected 集
 
 ```sql
 SELECT name FROM student WHERE age > 18 AND id != 3;
+SELECT name FROM student ORDER BY age DESC, name ASC;
+SHOW DATABASES;
+SHOW TABLES;
 ```
 
 关键表达式 AST：

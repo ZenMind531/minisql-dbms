@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypeAlias
 
@@ -150,10 +150,17 @@ class InsertStmt(ASTNode):
 
 
 @dataclass(slots=True, kw_only=True)
+class OrderByItem(ASTNode):
+    column_name: str
+    descending: bool = False
+
+
+@dataclass(slots=True, kw_only=True)
 class SelectStmt(ASTNode):
     columns: list[str] | None
     table: str
     where: Expr | None
+    order_by: list[OrderByItem] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         ASTNode.__post_init__(self)
@@ -167,7 +174,20 @@ class DeleteStmt(ASTNode):
     where: Expr | None
 
 
-Stmt: TypeAlias = CreateTableStmt | InsertStmt | SelectStmt | DeleteStmt
+@dataclass(slots=True, kw_only=True)
+class ShowDatabasesStmt(ASTNode):
+    pass
+
+
+@dataclass(slots=True, kw_only=True)
+class ShowTablesStmt(ASTNode):
+    pass
+
+
+Stmt: TypeAlias = (
+    CreateTableStmt | InsertStmt | SelectStmt | DeleteStmt
+    | ShowDatabasesStmt | ShowTablesStmt
+)
 
 
 __all__ = [
@@ -182,7 +202,10 @@ __all__ = [
     "InsertStmt",
     "LiteralExpr",
     "LiteralKind",
+    "OrderByItem",
     "SelectStmt",
+    "ShowDatabasesStmt",
+    "ShowTablesStmt",
     "Stmt",
     "TypeKind",
     "TypeSpec",

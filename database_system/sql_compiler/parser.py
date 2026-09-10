@@ -15,7 +15,10 @@ from database_system.sql_compiler.ast_nodes import (
     InsertStmt,
     LiteralExpr,
     LiteralKind,
+    OrderByItem,
     SelectStmt,
+    ShowDatabasesStmt,
+    ShowTablesStmt,
     Stmt,
     TypeKind,
     TypeSpec,
@@ -80,7 +83,9 @@ class Parser:
             return self._parse_select()
         if self._is_keyword("DELETE"):
             return self._parse_delete()
-        raise self._error(token, {"statement (CREATE, INSERT, SELECT, DELETE)"})
+        if self._is_keyword("SHOW"):
+            return self._parse_show()
+        raise self._error(token, {"statement (CREATE, INSERT, SELECT, DELETE, SHOW)"})
 
     def _parse_create_table(self) -> CreateTableStmt:
         start = self._consume_keyword("CREATE")
@@ -154,13 +159,42 @@ class Parser:
         self._consume_keyword("FROM")
         table = self._consume_identifier()
         where = self._parse_expression() if self._match_keyword("WHERE") else None
+        order_by = self._parse_order_by() if self._match_keyword("ORDER") else []
         return SelectStmt(
             line=start.line,
             column=start.column,
             columns=columns,
             table=table.lexeme,
             where=where,
+            order_by=order_by,
         )
+
+    def _parse_order_by(self) -> list[OrderByItem]:
+        self._consume_keyword("BY")
+        items = [self._parse_order_item()]
+        while self._match_lexeme(","):
+            items.append(self._parse_order_item())
+        return items
+
+    def _parse_order_item(self) -> OrderByItem:
+        column = self._consume_identifier()
+        descending = self._match_keyword("DESC")
+        if not descending:
+            self._match_keyword("ASC")
+        return OrderByItem(
+            line=column.line,
+            column=column.column,
+            column_name=column.lexeme,
+            descending=descending,
+        )
+
+    def _parse_show(self) -> Stmt:
+        start = self._consume_keyword("SHOW")
+        if self._match_keyword("DATABASES"):
+            return ShowDatabasesStmt(line=start.line, column=start.column)
+        if self._match_keyword("TABLES"):
+            return ShowTablesStmt(line=start.line, column=start.column)
+        raise self._error(self._current(), {"DATABASES", "TABLES"})
 
     def _parse_delete(self) -> DeleteStmt:
         start = self._consume_keyword("DELETE")
