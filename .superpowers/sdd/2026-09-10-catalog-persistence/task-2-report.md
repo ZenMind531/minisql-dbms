@@ -89,7 +89,62 @@ The full regression suite reported:
 
 ## Concerns
 
-None for the scoped requirements. This is CREATE-level compensation, not a
-general transaction mechanism: a hypothetical storage failure after only some
-catalog rows have been written is outside this task's single-process catalog
-contract and would require transactional catalog-row deletion to recover fully.
+None for the scoped requirements.
+
+## Fix round 1: partial catalog-row rollback
+
+Review identified that `register_table` writes one row at a time, while the
+initial rollback removed only the user table file. A failure after the first
+row could therefore leave a durable partial schema that made the next startup
+fail.
+
+### RED
+
+Command:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_engine.py -k "partial_catalog_rows or registration_and_cleanup_failures or two_argument" -v
+```
+
+Observed:
+
+```text
+2 failed, 1 passed, 22 deselected in 0.24s
+```
+
+- After an injected failure on the second `__catalog__` insertion, scanning the
+  catalog still returned `('broken', 'id', 'INT', 0)`.
+- When catalog cleanup was injected to fail, the raised error contained only
+  `registration failed`, losing the cleanup context.
+- The strengthened legacy test already passed and now executes CREATE through
+  `Executor(engine, catalog)` rather than only inspecting constructor state.
+
+### GREEN
+
+After adding exact-table catalog-row deletion, an explicit flush, continued
+user-file cleanup, and combined structured diagnostics, the same command
+reported:
+
+```text
+3 passed, 22 deselected in 0.10s
+```
+
+The complete engine suite reported:
+
+```text
+25 passed in 0.27s
+```
+
+The full regression command and result were:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+```text
+205 passed, 162 subtests passed in 0.77s
+```
+
+The new restart assertion constructs a new `MiniDB` after the injected partial
+write and verifies that startup succeeds with no `broken` schema or catalog row,
+while a pre-existing `stable` table and its exact catalog row remain intact.

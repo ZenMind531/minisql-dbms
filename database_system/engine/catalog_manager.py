@@ -151,11 +151,29 @@ class CatalogManager:
         self.engine.create_table(schema)
         try:
             self.register_table(schema)
-        except Exception as error:
+        except Exception as registration_error:
+            cleanup_errors: list[Exception] = []
+            try:
+                self.engine.delete_where(
+                    CATALOG_TABLE, lambda row: row[0] == schema.name
+                )
+            except Exception as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            try:
+                self.engine.flush()
+            except Exception as cleanup_error:
+                cleanup_errors.append(cleanup_error)
             try:
                 self.engine.remove_table(schema.name)
-            except StorageError as rollback_error:
-                error.add_note(f"回滚表文件失败: {rollback_error}")
+            except Exception as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+
+            if cleanup_errors:
+                details = "; ".join(str(error) for error in cleanup_errors)
+                raise StorageError(
+                    f"创建表 '{schema.name}' 时目录登记失败: "
+                    f"{registration_error}; 回滚失败: {details}"
+                ) from registration_error
             raise
         catalog.create_table(schema.name, schema.columns)
 

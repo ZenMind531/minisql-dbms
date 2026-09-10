@@ -9,6 +9,7 @@ from database_system.engine.minidb import MiniDB
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind, TypeSpec
 from database_system.sql_compiler.catalog import Catalog, TableSchema
+from database_system.sql_compiler.planner import CreateTable
 from database_system.utils.constants import PAGE_SIZE
 from database_system.utils.errors import StorageError
 
@@ -350,6 +351,92 @@ def test_create_table_rolls_back_only_new_file_when_catalog_write_fails(
         engine.close()
 
 
+def test_create_table_removes_partial_catalog_rows_when_second_insert_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = StorageEngine(str(tmp_path))
+    manager = CatalogManager(engine)
+    catalog = manager.load()
+    stable_schema = TableSchema(
+        name="stable", columns=[column("id", TypeKind.INT)]
+    )
+    manager.create_table(stable_schema, catalog)
+    schema = TableSchema(
+        name="broken",
+        columns=[
+            column("id", TypeKind.INT),
+            column("name", TypeKind.VARCHAR, 32),
+        ],
+    )
+    real_insert = engine.insert_row
+    catalog_inserts = 0
+
+    def fail_second_catalog_insert(table: str, row: tuple) -> None:
+        nonlocal catalog_inserts
+        if table == "__catalog__":
+            catalog_inserts += 1
+            if catalog_inserts == 2:
+                raise StorageError("injected second catalog insert failure")
+        real_insert(table, row)
+
+    monkeypatch.setattr(engine, "insert_row", fail_second_catalog_insert)
+    try:
+        with pytest.raises(StorageError, match="second catalog insert failure"):
+            manager.create_table(schema, catalog)
+
+        assert not (tmp_path / "broken.dat").exists()
+        assert list(engine.scan("__catalog__")) == [
+            ("stable", "id", "INT", 0)
+        ]
+        assert catalog.find_table("broken") is None
+        assert catalog.find_table("__catalog__") == CATALOG_SCHEMA
+    finally:
+        engine.close()
+
+    reopened = MiniDB(str(tmp_path))
+    try:
+        assert reopened.catalog.find_table("broken") is None
+        assert reopened.catalog.find_table("stable") == stable_schema
+        assert list(reopened.engine.scan("__catalog__")) == [
+            ("stable", "id", "INT", 0)
+        ]
+    finally:
+        reopened.close()
+
+
+def test_create_table_reports_registration_and_cleanup_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = StorageEngine(str(tmp_path))
+    manager = CatalogManager(engine)
+    catalog = manager.load()
+    schema = TableSchema(name="broken", columns=[column("id", TypeKind.INT)])
+    registration_error = StorageError("registration failed")
+
+    def fail_registration(table_schema: TableSchema) -> None:
+        raise registration_error
+
+    def fail_catalog_cleanup(table: str, pred) -> int:
+        assert table == "__catalog__"
+        assert pred(("broken", "id", "INT", 0))
+        assert not pred(("stable", "id", "INT", 0))
+        raise StorageError("catalog cleanup failed")
+
+    monkeypatch.setattr(manager, "register_table", fail_registration)
+    monkeypatch.setattr(engine, "delete_where", fail_catalog_cleanup)
+    try:
+        with pytest.raises(StorageError) as caught:
+            manager.create_table(schema, catalog)
+
+        assert "registration failed" in caught.value.message
+        assert "catalog cleanup failed" in caught.value.message
+        assert caught.value.__cause__ is registration_error
+        assert not (tmp_path / "broken.dat").exists()
+        assert catalog.find_table("broken") is None
+    finally:
+        engine.close()
+
+
 def test_storage_create_rejects_an_existing_table_file(tmp_path: Path) -> None:
     engine = StorageEngine(str(tmp_path))
     schema = student_schema()
@@ -380,8 +467,14 @@ def test_storage_remove_rejects_system_catalog(tmp_path: Path) -> None:
 
 def test_executor_two_argument_constructor_remains_supported(tmp_path: Path) -> None:
     engine = StorageEngine(str(tmp_path))
+    catalog = Catalog()
     try:
-        executor = Executor(engine, Catalog())
-        assert executor.catalog.find_table("student") is None
+        executor = Executor(engine, catalog)
+
+        assert executor.execute(
+            CreateTable("student", student_schema().columns)
+        ) == "OK"
+        assert (tmp_path / "student.dat").is_file()
+        assert catalog.find_table("student") == student_schema()
     finally:
         engine.close()
