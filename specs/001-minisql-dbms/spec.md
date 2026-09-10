@@ -110,7 +110,7 @@ SELECT（含 WHERE）、DELETE，得到正确结果；数据持久化到磁盘�
 
 **SQL 编译器（US1）**
 
-- **FR-001**: 词法分析器 MUST 识别关键字（SELECT/FROM/WHERE/CREATE/TABLE/INSERT/INTO/VALUES/DELETE/AND/OR/NOT/INT/VARCHAR）、标识符、常量（整数、浮点、字符串）、运算符（= != > >= < <= + - * /）、分隔符（( ) , ;），并跳过空白与注释（`--` 单行、`/* */` 多行）。
+- **FR-001**: 词法分析器 MUST 识别关键字（SELECT/FROM/WHERE/CREATE/TABLE/INSERT/INTO/VALUES/DELETE/AND/OR/NOT/INT/VARCHAR，以及已实现扩展 SHOW/DATABASES/TABLES/ORDER/BY/ASC/DESC）、标识符、常量（整数、浮点、字符串）、运算符（= != > >= < <= + - * /）、分隔符（( ) , ;），并跳过空白与注释（`--` 单行、`/* */` 多行）。
 - **FR-002**: 每个 Token MUST 携带类型、词素、行号、列号；关键字大小写不敏感，标识符与字符串内容保持原样。
 - **FR-003**: 语法分析器 MUST 支持 CREATE TABLE / INSERT / SELECT / DELETE 四类语句并构造结构化 AST（语句节点 + 表达式节点），AST 节点保留源码位置；VARCHAR 列类型必须写为 `VARCHAR(n)`，其中 `1 <= n <= 255`。
 - **FR-004**: WHERE 表达式 MUST 按 NOT > 比较 > AND > OR 的优先级构造 AST，括号可显式改变结合结构。
@@ -135,13 +135,15 @@ SELECT（含 WHERE）、DELETE，得到正确结果；数据持久化到磁盘�
 - **FR-016**: 系统目录 MUST 维护表/列元数据，并作为特殊表存储、可查询。
 - **FR-016A**: 首次启动 MUST 先以专用 bootstrap 流程创建 `__catalog__`，不递归登记自身；普通表由 StorageEngine 创建数据文件后，再由 CatalogManager 登记并更新内存 Catalog。
 - **FR-017**: CLI MUST 支持交互式 REPL 与执行 SQL 脚本文件两种模式，逐条显示结果或错误，单条语句失败不影响后续语句。
+- **FR-018**: 系统 SHOULD 支持 `SHOW DATABASES` 与 `SHOW TABLES`；后者只显示用户表并按名称升序排列。
+- **FR-019**: SELECT SHOULD 支持多列 `ORDER BY column [ASC|DESC]`；省略方向时升序，排序列可以不在投影列表中。
 
 ### Key Entities
 
 - **Token**: 词法单元；属性：类型、词素、行号、列号。
-- **AST 节点**: 语句节点（CreateTableStmt/InsertStmt/SelectStmt/DeleteStmt）与表达式节点（BinaryExpr/UnaryExpr/IdentifierExpr/LiteralExpr）；携带源码位置。
+- **AST 节点**: 语句节点（CreateTableStmt/InsertStmt/SelectStmt/DeleteStmt/ShowDatabasesStmt/ShowTablesStmt）、OrderByItem 与表达式节点（BinaryExpr/UnaryExpr/IdentifierExpr/LiteralExpr）；携带源码位置。
 - **Catalog（系统目录）**: 模式元数据；表 → 列名/类型 的映射，支持 create_table/find_table/find_column/get_type。
-- **Logical Plan 节点**: CreateTable/Insert/Delete/SeqScan/Filter/Project；仅保存执行所需信息。
+- **Logical Plan 节点**: CreateTable/Insert/Delete/SeqScan/Filter/Sort/Project/ShowDatabases/ShowTables；仅保存执行所需信息。
 - **Page**: 4KB 固定大小；页号、页头、行数据、槽、空闲空间。
 - **Row（记录）**: 按表模式序列化的字节序列，映射到页内槽位。
 
@@ -164,4 +166,4 @@ SELECT（含 WHERE）、DELETE，得到正确结果；数据持久化到磁盘�
 - 单用户、单进程、无并发控制与事务（属扩展项，不在必做范围）。
 - 表规模以教学演示为准（数千行量级），无硬性能指标要求，但全表扫描在演示数据量下应瞬时返回。
 - 目录结构采用课程建议的 `database_system/` 布局，4 人小组按模块分工。
-- UPDATE / JOIN / ORDER BY / GROUP BY / 索引 / 代价模型为扩展项，仅在必做项完成并验收后投入。
+- UPDATE / JOIN / LIMIT / GROUP BY / 索引 / 代价模型不在当前范围；SHOW 与多列 ORDER BY 已作为扩展实现。

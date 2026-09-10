@@ -1,6 +1,9 @@
 # MiniSQL SQL 子集文法
 
-本文档是 MiniSQL 语法分析器的唯一文法准绳。`lexer.py`、`parser.py`、AST 定义和相关测试必须与本文同步。本文定义 CREATE TABLE、INSERT、SELECT、DELETE、SHOW，以及 SELECT 的多列 ORDER BY；UPDATE、JOIN、LIMIT、GROUP BY、NULL 等不在当前范围内。
+本文档是 MiniSQL 当前实现的 SQL 词法与语法准绳。`lexer.py`、`parser.py`、
+AST 定义和相关测试必须与本文同步。本文定义 CREATE TABLE、INSERT、SELECT、
+DELETE、SHOW，以及 SELECT 的多列 ORDER BY；UPDATE、JOIN、LIMIT、GROUP BY、
+NULL 等不在当前范围内。
 
 ## 1. 记号约定
 
@@ -225,7 +228,7 @@ Parser 只负责按文法构造 AST。诸如对 VARCHAR 使用算术运算、WHE
 
 ## 9. 词法规则
 
-### 8.1 关键字
+### 9.1 关键字
 
 ```text
 SELECT  FROM    WHERE   CREATE  TABLE
@@ -236,7 +239,7 @@ SHOW    DATABASES TABLES ORDER BY ASC DESC
 
 关键字匹配大小写不敏感，例如 `select`、`SELECT` 和 `SeLeCt` 产生同一种关键字 Token。标识符和字符串内容必须保留源码中的原始内容。
 
-### 8.2 标识符
+### 9.2 标识符
 
 ```ebnf
 IDENTIFIER          ::= identifier_start { identifier_part } ;
@@ -249,7 +252,7 @@ identifier_part     ::= letter | digit | "_" ;
 - 不支持带引号标识符。
 - 与关键字大小写无关匹配后，剩余符合规则的词素才产生 IDENTIFIER。
 
-### 8.3 数字常量
+### 9.3 数字常量
 
 ```ebnf
 INTEGER_LITERAL     ::= digit { digit } ;
@@ -264,7 +267,7 @@ FLOAT_LITERAL       ::= digit { digit } "." digit { digit } ;
   数据类型；SemanticAnalyzer 必须统一报告“不支持 FLOAT 类型”。FLOAT 不得
   用作列类型，Executor 无需实现浮点运算。
 
-### 8.4 字符串常量
+### 9.4 字符串常量
 
 ```ebnf
 STRING_LITERAL      ::= "'" { string_character | "''" } "'" ;
@@ -276,7 +279,7 @@ STRING_LITERAL      ::= "'" { string_character | "''" } "'" ;
 - 字符串不得跨越物理行；遇到换行或 EOF 仍未闭合时抛出 LexError。
 - 双引号字符串不在支持范围内。
 
-### 8.5 运算符与分隔符
+### 9.5 运算符与分隔符
 
 ```text
 运算符：=  !=  >  >=  <  <=  +  -  *  /
@@ -285,7 +288,7 @@ STRING_LITERAL      ::= "'" { string_character | "''" } "'" ;
 
 Lexer 必须采用最长匹配，因此 `>=`、`<=`、`!=` 各自产生单个 Token。单独的 `!` 非法。
 
-### 8.6 空白与注释
+### 9.6 空白与注释
 
 ```ebnf
 line_comment        ::= "--" { any_character_except_newline }
@@ -302,7 +305,7 @@ block_comment       ::= "/*" { block_comment_character } "*/" ;
 
 ## 10. 错误要求
 
-### 9.1 词法错误
+### 10.1 词法错误
 
 Lexer 遇到非法字符、非法数字、未闭合字符串或未闭合块注释时，必须抛出统一的 `LexError`。错误包含：
 
@@ -313,7 +316,7 @@ Lexer 遇到非法字符、非法数字、未闭合字符串或未闭合块注�
 
 Lexer 不得吞掉非法字符或用 UNKNOWN Token 继续伪装成功。
 
-### 9.2 语法错误
+### 10.2 语法错误
 
 Parser 遇到不符合本文文法的 Token 时，必须抛出统一的 `ParseError`。错误包含：
 
@@ -330,7 +333,7 @@ SELECT name FROM student WHERE age > 18 AND;
 
 Parser 在 `;` 处报告错误，expected 集合应包含可开始一元或基本表达式的 Token，例如 `NOT`、`+`、`-`、`IDENTIFIER`、INTEGER_LITERAL、FLOAT_LITERAL、STRING_LITERAL、`(`。
 
-### 9.3 语法与语义的边界
+### 10.3 语法与语义的边界
 
 Parser 只判断 Token 序列是否符合本文文法。以下问题交给 SemanticAnalyzer：
 
@@ -343,26 +346,31 @@ Parser 只判断 Token 序列是否符合本文文法。以下问题交给 Seman
 
 ## 11. Parser 实现映射
 
-递归下降 Parser 应让函数层次直接对应文法层次，建议至少包含：
+当前递归下降 Parser 的函数层次与文法直接对应：
 
 ```text
 parse
-parse_statement
-parse_create_table
-parse_insert
-parse_select
-parse_delete
-parse_show
-parse_order_by
-parse_expression
-parse_or
-parse_and
-parse_comparison
-parse_not
-parse_additive
-parse_multiplicative
-parse_unary
-parse_primary
+_parse_statement
+_parse_create_table
+_parse_column_definition
+_parse_type_specification
+_parse_insert
+_parse_select
+_parse_delete
+_parse_show
+_parse_order_by
+_parse_order_item
+_parse_identifier_list
+_parse_expression_list
+_parse_expression
+_parse_or_expression
+_parse_and_expression
+_parse_comparison_expression
+_parse_not_expression
+_parse_additive_expression
+_parse_multiplicative_expression
+_parse_unary_expression
+_parse_primary_expression
 ```
 
 不得用与本文优先级不同的通用解析捷径。若修改任何产生式，必须在同一次变更中同步更新 Parser、AST（如受影响）和对应测试；涉及冻结 Token/AST 契约时，先取得规定的评审同意。

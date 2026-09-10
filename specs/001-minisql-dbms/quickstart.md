@@ -45,14 +45,18 @@ pytest tests/test_storage.py tests/test_buffer.py -v
 # 含：页读写一致性、LRU/FIFO 固定序列命中率、脏页 flush 后重启可读
 ```
 
-## 端到端演示（US3 验收，即报告附录演示 SQL）
+## 端到端演示（US3 待完成）
+
+当前 `tests/test_engine.py` 已覆盖引擎、目录持久化与重启恢复，但正式交付要求的
+`tests/test_e2e.py` 和 `tests/sql/demo_e2e.sql` 尚未创建。以下命令和脚本是
+T028/T034 的验收目标，文件落地前不要把本节视为已通过：
 
 ```powershell
 .\start.ps1 --file tests/sql/demo_e2e.sql --data .\tmp\minidb   # Windows
 bash start.sh --file tests/sql/demo_e2e.sql --data ./tmp/minidb # Linux
 ```
 
-`demo_e2e.sql` 内容：
+计划中的 `demo_e2e.sql` 基础内容：
 
 ```sql
 CREATE TABLE student(id INT, name VARCHAR(32), age INT);
@@ -64,7 +68,7 @@ DELETE FROM student WHERE id = 1;
 SELECT * FROM student;
 ```
 
-预期输出：
+基础脚本预期输出：
 
 ```text
 OK
@@ -78,6 +82,8 @@ OK
 ```
 
 ## 持久化验证
+
+完成 T028/T034 后，使用同一数据目录重新启动：
 
 ```powershell
 .\start.ps1 --data .\tmp\minidb   # Windows

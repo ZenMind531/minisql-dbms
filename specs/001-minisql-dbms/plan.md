@@ -23,7 +23,7 @@ OrderedDict 实现 LRU，pytest 测试，按模块契约并行开发。
 **Project Type**: cli（编译器 + 存储引擎 + CLI 的单体教学系统）
 **Performance Goals**: 教学数据量（数千行）下任意单条 SQL 响应 < 1s
 **Constraints**: 核心功能仅标准库；页大小固定 4KB；单进程无并发
-**Scale/Scope**: 4 类 SQL 语句、6 个逻辑算子、约 3–5k 行代码、4 人分工
+**Scale/Scope**: 4 类核心 SQL 语句、SHOW、SELECT 多列排序、教学型逻辑算子、4 人分工
 
 ## Constitution Check
 
@@ -75,7 +75,8 @@ database_system/
 ├── engine/                # 数据库引擎模块
 │   ├── executor.py        # 执行引擎（算子执行）
 │   ├── storage_engine.py  # 行/页映射、序列化
-│   └── catalog_manager.py # 系统目录持久化（特殊表）
+│   ├── catalog_manager.py # 系统目录持久化（特殊表）
+│   └── minidb.py          # 顶层编排
 ├── cli/
 │   └── main.py            # REPL + 脚本模式入口
 ├── utils/
@@ -84,9 +85,9 @@ database_system/
 │   └── helpers.py
 tests/
 ├── test_lexer.py  test_parser.py  test_semantic.py  test_planner.py
-├── test_storage.py  test_buffer.py
-├── test_engine.py  test_e2e.py
-└── sql/                 # 测试用 SQL 脚本（正常 + 各类错误）
+├── test_storage.py  test_buffer.py  test_storage_persist.py
+├── test_engine.py  test_cli.py  test_show_order.py
+└── sql/                 # 编译器案例；正式 demo_e2e.sql 尚待补齐
 docs/
 ├── grammar.md           # SQL 子集文法（显式提交）
 └── design.md            # AST / Catalog / Plan 结构说明
