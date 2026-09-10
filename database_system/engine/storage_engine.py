@@ -78,8 +78,38 @@ class StorageEngine:
     # ---------- 表 ----------
     def create_table(self, schema: TableSchema) -> None:
         """只创建并初始化 .dat 文件；目录登记由 CatalogManager 负责。"""
+        path = self.data_dir / f"{schema.name}.dat"
+        if path.exists():
+            raise StorageError(f"表 '{schema.name}' 的数据文件已存在")
+        try:
+            self._open(schema.name)
+        except (OSError, ValueError) as error:
+            raise StorageError(
+                f"无法创建表 '{schema.name}' 的数据文件: {error}"
+            ) from error
         self._schemas[schema.name] = schema
-        self._open(schema.name)
+
+    def remove_table(self, table: str) -> None:
+        """Close and remove one user-table file during CREATE rollback."""
+        if table == "__catalog__":
+            raise StorageError("不能删除系统目录 '__catalog__'")
+
+        path = self.data_dir / f"{table}.dat"
+        handle = self._open_tables.pop(table, None)
+        if handle is not None:
+            manager, pool = handle
+            try:
+                pool.flush_all()
+                manager.close()
+            except OSError as error:
+                raise StorageError(f"无法关闭表 '{table}': {error}") from error
+        self._schemas.pop(table, None)
+        try:
+            path.unlink()
+        except FileNotFoundError as error:
+            raise StorageError(f"表 '{table}' 的数据文件不存在") from error
+        except OSError as error:
+            raise StorageError(f"无法删除表 '{table}' 的数据文件: {error}") from error
 
     def attach_table(self, schema: TableSchema) -> None:
         """Attach an existing table file to its recovered schema."""

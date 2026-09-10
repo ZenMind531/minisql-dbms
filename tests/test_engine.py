@@ -4,9 +4,11 @@ from pathlib import Path
 import pytest
 
 from database_system.engine.catalog_manager import CATALOG_SCHEMA, CatalogManager
+from database_system.engine.executor import Executor
+from database_system.engine.minidb import MiniDB
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind, TypeSpec
-from database_system.sql_compiler.catalog import TableSchema
+from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.utils.constants import PAGE_SIZE
 from database_system.utils.errors import StorageError
 
@@ -300,5 +302,86 @@ def test_load_adds_catalog_context_to_storage_read_failures(
         with pytest.raises(StorageError, match="__catalog__") as caught:
             manager.load()
         assert caught.value.__cause__ is read_error
+    finally:
+        engine.close()
+
+
+def test_minidb_create_survives_close_and_restart(tmp_path: Path) -> None:
+    db = MiniDB(str(tmp_path))
+    try:
+        assert db.execute("CREATE TABLE student (id INT, name VARCHAR(32));") == "OK"
+        assert db.execute("INSERT INTO student VALUES (7, 'Alice');") == (
+            "1 row(s) inserted"
+        )
+    finally:
+        db.close()
+
+    reopened = MiniDB(str(tmp_path))
+    try:
+        assert reopened.execute("SELECT id, name FROM student;") == "(7, 'Alice')"
+    finally:
+        reopened.close()
+
+
+def test_create_table_rolls_back_only_new_file_when_catalog_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = StorageEngine(str(tmp_path))
+    manager = CatalogManager(engine)
+    catalog = manager.load()
+    schema = TableSchema(name="broken", columns=[column("id", TypeKind.INT)])
+    catalog_path = tmp_path / "__catalog__.dat"
+    catalog_bytes = catalog_path.read_bytes()
+
+    def fail_registration(table_schema: TableSchema) -> None:
+        assert table_schema == schema
+        raise StorageError("injected catalog failure")
+
+    monkeypatch.setattr(manager, "register_table", fail_registration)
+    try:
+        with pytest.raises(StorageError, match="injected catalog failure"):
+            manager.create_table(schema, catalog)
+
+        assert not (tmp_path / "broken.dat").exists()
+        assert catalog_path.read_bytes() == catalog_bytes
+        assert catalog.find_table("broken") is None
+        assert catalog.find_table("__catalog__") == CATALOG_SCHEMA
+    finally:
+        engine.close()
+
+
+def test_storage_create_rejects_an_existing_table_file(tmp_path: Path) -> None:
+    engine = StorageEngine(str(tmp_path))
+    schema = student_schema()
+    try:
+        engine.create_table(schema)
+        original = (tmp_path / "student.dat").read_bytes()
+
+        with pytest.raises(StorageError, match="student"):
+            engine.create_table(schema)
+
+        assert (tmp_path / "student.dat").read_bytes() == original
+    finally:
+        engine.close()
+
+
+def test_storage_remove_rejects_system_catalog(tmp_path: Path) -> None:
+    engine = StorageEngine(str(tmp_path))
+    try:
+        CatalogManager(engine).load()
+
+        with pytest.raises(StorageError, match="__catalog__"):
+            engine.remove_table("__catalog__")
+
+        assert (tmp_path / "__catalog__.dat").is_file()
+    finally:
+        engine.close()
+
+
+def test_executor_two_argument_constructor_remains_supported(tmp_path: Path) -> None:
+    engine = StorageEngine(str(tmp_path))
+    try:
+        executor = Executor(engine, Catalog())
+        assert executor.catalog.find_table("student") is None
     finally:
         engine.close()

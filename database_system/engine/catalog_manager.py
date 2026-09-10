@@ -145,5 +145,19 @@ class CatalogManager:
             )
         self.engine.flush()
 
+    def create_table(self, schema: TableSchema, catalog: Catalog) -> None:
+        """Create storage, persist metadata, then publish the schema in memory."""
+        Catalog().create_table(schema.name, schema.columns)
+        self.engine.create_table(schema)
+        try:
+            self.register_table(schema)
+        except Exception as error:
+            try:
+                self.engine.remove_table(schema.name)
+            except StorageError as rollback_error:
+                error.add_note(f"回滚表文件失败: {rollback_error}")
+            raise
+        catalog.create_table(schema.name, schema.columns)
+
 
 __all__ = ["CATALOG_SCHEMA", "CatalogManager"]

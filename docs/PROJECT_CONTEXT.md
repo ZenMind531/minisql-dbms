@@ -389,3 +389,23 @@ Parser 未出现 `LexError`/`ParseError` 以外的异常，意外崩溃数为 0�
   **180 项测试、162 个 subtests 全部通过**。
 - 当前仍未实现 CatalogManager，重启后恢复表结构仍是端到端验收阻塞；
   `tests/test_engine.py`、`tests/test_e2e.py` 和 `tests/sql/demo_e2e.sql` 仍待补。
+
+## 19. 系统目录持久化与可恢复 CREATE（2026-09-10）
+
+- `CatalogManager.load()` 已能 bootstrap 或加载 `__catalog__`，按
+  `(table_name, col_name, col_type, col_order)` 重建内存 Catalog，并把已登记的
+  用户表连接到新的 `StorageEngine` 实例。
+- `CatalogManager.create_table(schema, catalog)` 固定按“创建用户表文件 → 持久化
+  目录行 → 更新内存 Catalog”执行。目录登记失败时只关闭并删除本次新建的用户表
+  文件，不登记内存 schema；`StorageEngine.remove_table()` 明确禁止删除
+  `__catalog__`。
+- `StorageEngine.create_table()` 不再打开或覆盖已存在的路径；恢复已有表必须使用
+  `attach_table()`。`Executor(engine, catalog, catalog_manager=None)` 保持两参数调用
+  兼容，提供 CatalogManager 时由其执行持久化 CREATE。
+- `MiniDB` 启动时加载 CatalogManager，因此 CREATE + INSERT 后关闭并新建实例，
+  SELECT 可恢复 schema 与数据。
+- `tests/test_engine.py` 当前 23 项通过；完整 pytest 回归为 **203 项测试、162 个
+  subtests 全部通过**（CPython 3.11.16 + pytest 9.1.1）。
+
+下一步引擎工作是补齐 `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql`，完成
+quickstart 的百行插入、条件查询、删除和再次重启验收。

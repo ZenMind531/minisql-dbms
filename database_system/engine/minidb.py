@@ -16,9 +16,9 @@
 
 from __future__ import annotations
 
+from database_system.engine.catalog_manager import CatalogManager
 from database_system.engine.executor import Executor, Result
 from database_system.engine.storage_engine import StorageEngine
-from database_system.sql_compiler.catalog import Catalog
 from database_system.sql_compiler.lexer import Lexer
 from database_system.sql_compiler.optimizer import Optimizer
 from database_system.sql_compiler.parser import Parser
@@ -36,10 +36,10 @@ def _format(result: Result) -> str:
 class MiniDB:
     def __init__(self, data_dir: str = "data/"):
         self.data_dir = data_dir
-        # 常驻 Catalog：REPL 里 CREATE TABLE 建的表，后续语句要能看见
-        self.catalog = Catalog()
         self.engine = StorageEngine(data_dir)
-        self.executor = Executor(self.engine, self.catalog)
+        self.catalog_manager = CatalogManager(self.engine)
+        self.catalog = self.catalog_manager.load()
+        self.executor = Executor(self.engine, self.catalog, self.catalog_manager)
         self._planner = Planner()
         self._optimizer = Optimizer()
 

@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Any, Callable, Iterator, TypeAlias
+from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeAlias
 
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import (
@@ -26,6 +26,9 @@ from database_system.sql_compiler.planner import (
     CreateTable, Delete, Filter, Insert, PlanNode, Project, SeqScan,
 )
 from database_system.utils.errors import ExecError
+
+if TYPE_CHECKING:
+    from database_system.engine.catalog_manager import CatalogManager
 
 Result: TypeAlias = str | list[tuple]
 
@@ -103,9 +106,15 @@ def _base_table(plan: PlanNode) -> str:
 
 
 class Executor:
-    def __init__(self, engine: StorageEngine, catalog: Catalog):
+    def __init__(
+        self,
+        engine: StorageEngine,
+        catalog: Catalog,
+        catalog_manager: CatalogManager | None = None,
+    ):
         self.engine = engine
         self.catalog = catalog
+        self.catalog_manager = catalog_manager
 
     # ---------- 入口 ----------
     def execute(self, plan: PlanNode) -> Result:
@@ -121,8 +130,12 @@ class Executor:
     def _create_table(self, plan: CreateTable) -> str:
         # 先借 Catalog 的规则做纯校验：不过就不碰磁盘，不会留下半个表
         Catalog().create_table(plan.table, plan.schema)
-        self.engine.create_table(TableSchema(name=plan.table, columns=list(plan.schema)))
-        self.catalog.create_table(plan.table, plan.schema)
+        schema = TableSchema(name=plan.table, columns=list(plan.schema))
+        if self.catalog_manager is None:
+            self.engine.create_table(schema)
+            self.catalog.create_table(plan.table, plan.schema)
+        else:
+            self.catalog_manager.create_table(schema, self.catalog)
         return "OK"
 
     def _insert(self, plan: Insert) -> str:
