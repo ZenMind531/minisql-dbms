@@ -12,13 +12,13 @@ MiniSQL 是一个使用 Python 3.11 和标准库实现的教学型关系数据�
 git clone https://github.com/ZenMind531/minisql-dbms.git && cd minisql-dbms && ./install.sh
 ```
 
-装完在任意目录敲 `minidb` 进入交互式命令行：
+装完在任意目录敲 `minidb` 进入交互式命令行，然后粘贴以下语句：
 
 ```sql
-MiniDB> CREATE TABLE student(id INT, name VARCHAR(32), age INT);
-MiniDB> INSERT INTO student VALUES (1, 'Alice', 20);
-MiniDB> SELECT * FROM student WHERE age > 18;
-MiniDB> exit;
+CREATE TABLE student(id INT, name VARCHAR(32), age INT);
+INSERT INTO student VALUES (1, 'Alice', 20);
+SELECT * FROM student WHERE age > 18;
+exit;
 ```
 
 数据文件存放在 `data/` 目录，退出时自动落盘。
