@@ -25,6 +25,10 @@ coverage.xml
 *.egg-info/
 .eggs/
 
+# 运行时数据：数据库文件与临时目录（跑一次 minidb 就会生成）
+data/
+tmp/
+
 # 本地环境配置（保留可提交的配置模板）
 .env
 .env.*
