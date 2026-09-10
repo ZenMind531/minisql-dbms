@@ -80,6 +80,19 @@ class StorageEngine:
         self._schemas[schema.name] = schema
         self._open(schema.name)
 
+    def attach_table(self, schema: TableSchema) -> None:
+        """Attach an existing table file to its recovered schema."""
+        path = self.data_dir / f"{schema.name}.dat"
+        if not path.is_file():
+            raise StorageError(f"表 '{schema.name}' 的数据文件不存在")
+        try:
+            self._open(schema.name)
+        except (OSError, ValueError) as error:
+            raise StorageError(
+                f"无法打开表 '{schema.name}' 的数据文件: {error}"
+            ) from error
+        self._schemas[schema.name] = schema
+
     def _open(self, table: str) -> tuple[FileManager, BufferPool]:
         handle = self._open_tables.get(table)
         if handle is None:
