@@ -1,10 +1,45 @@
-# Python 编译缓存
+# Python 字节码与缓存
 __pycache__/
-*.pyc
+*.py[cod]
 
-# 虚拟环境
+# 本地虚拟环境
 .venv/
+venv/
+env/
+ENV/
 
-# 运行时数据（数据库文件）
-data/
-tmp/
+# 测试、覆盖率与静态检查缓存
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# Python 构建产物
+/build/
+/dist/
+*.egg-info/
+.eggs/
+
+# 本地环境配置（保留可提交的配置模板）
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# 编辑器与临时文件
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统生成文件
+.DS_Store
+Thumbs.db
+Desktop.ini
