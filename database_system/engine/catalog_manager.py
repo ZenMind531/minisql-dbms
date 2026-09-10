@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import struct
 
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind, TypeSpec
@@ -42,6 +43,16 @@ CATALOG_SCHEMA = TableSchema(
 
 _VARCHAR_TYPE = re.compile(r"VARCHAR\(([1-9][0-9]{0,2})\)")
 
+
+def _validate_name(name: str, description: str) -> None:
+    try:
+        encoded = name.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise StorageError(f"{description}不能编码为 UTF-8") from error
+    if len(encoded) > 255:
+        raise StorageError(f"{description}的 UTF-8 长度不能超过 255 字节")
+
+
 def _encode_type(type_spec: TypeSpec) -> str:
     if type_spec.kind is TypeKind.INT:
         return "INT"
@@ -78,10 +89,21 @@ class CatalogManager:
         catalog = Catalog()
         catalog.create_table(CATALOG_SCHEMA.name, CATALOG_SCHEMA.columns)
 
+        try:
+            rows = list(self.engine.scan(CATALOG_TABLE))
+        except (
+            struct.error,
+            UnicodeDecodeError,
+            ValueError,
+            OSError,
+            StorageError,
+        ) as error:
+            raise StorageError(
+                f"读取系统目录 '{CATALOG_TABLE}' 失败: {error}"
+            ) from error
+
         grouped: dict[str, list[tuple[str, str, int]]] = {}
-        for table_name, column_name, type_text, column_order in self.engine.scan(
-            CATALOG_TABLE
-        ):
+        for table_name, column_name, type_text, column_order in rows:
             grouped.setdefault(table_name, []).append(
                 (column_name, type_text, column_order)
             )
@@ -112,6 +134,10 @@ class CatalogManager:
 
     def register_table(self, schema: TableSchema) -> None:
         """Append one durable catalog row for every schema column."""
+        _validate_name(schema.name, "表名")
+        for column in schema.columns:
+            _validate_name(column.name, f"表 '{schema.name}' 的列名")
+
         for position, column in enumerate(schema.columns):
             self.engine.insert_row(
                 CATALOG_TABLE,

@@ -23,6 +23,7 @@ from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind
 from database_system.sql_compiler.catalog import TableSchema
 from database_system.storage.buffer import BufferPool
 from database_system.storage.file_manager import FileManager
+from database_system.utils.constants import PAGE_SIZE
 from database_system.utils.errors import StorageError
 
 INT_FORMAT = "<i"
@@ -85,6 +86,14 @@ class StorageEngine:
         path = self.data_dir / f"{schema.name}.dat"
         if not path.is_file():
             raise StorageError(f"表 '{schema.name}' 的数据文件不存在")
+        try:
+            size = path.stat().st_size
+        except OSError as error:
+            raise StorageError(
+                f"无法检查表 '{schema.name}' 的数据文件: {error}"
+            ) from error
+        if size < PAGE_SIZE:
+            raise StorageError(f"表 '{schema.name}' 的数据文件不完整")
         try:
             self._open(schema.name)
         except (OSError, ValueError) as error:

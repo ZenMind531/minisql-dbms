@@ -1,3 +1,4 @@
+import struct
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from database_system.engine.catalog_manager import CATALOG_SCHEMA, CatalogManage
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind, TypeSpec
 from database_system.sql_compiler.catalog import TableSchema
+from database_system.utils.constants import PAGE_SIZE
 from database_system.utils.errors import StorageError
 
 
@@ -169,3 +171,134 @@ def test_load_reports_corrupt_catalog_file_as_storage_error(tmp_path: Path) -> N
             CatalogManager(reopened).load()
     finally:
         reopened.close()
+
+
+@pytest.mark.parametrize("target", ["catalog", "table"])
+def test_load_rejects_truncated_existing_file_without_overwriting(
+    tmp_path: Path, target: str
+) -> None:
+    truncated = b"existing-but-truncated"
+    if target == "catalog":
+        path = tmp_path / "__catalog__.dat"
+        path.write_bytes(truncated)
+    else:
+        engine = StorageEngine(str(tmp_path))
+        manager = CatalogManager(engine)
+        manager.load()
+        schema = student_schema()
+        engine.create_table(schema)
+        manager.register_table(schema)
+        engine.close()
+        path = tmp_path / "student.dat"
+        path.write_bytes(truncated)
+
+    reopened = StorageEngine(str(tmp_path))
+    try:
+        with pytest.raises(StorageError):
+            CatalogManager(reopened).load()
+    finally:
+        reopened.close()
+
+    assert path.read_bytes() == truncated
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        TableSchema(
+            name="表" * 86,
+            columns=[column("id", TypeKind.INT)],
+        ),
+        TableSchema(
+            name="student",
+            columns=[
+                column("id", TypeKind.INT),
+                column("列" * 86, TypeKind.VARCHAR, 32),
+            ],
+        ),
+    ],
+    ids=["table-name", "later-column-name"],
+)
+def test_register_rejects_names_over_255_utf8_bytes_before_writing(
+    tmp_path: Path, schema: TableSchema
+) -> None:
+    engine = StorageEngine(str(tmp_path))
+    try:
+        manager = CatalogManager(engine)
+        manager.load()
+
+        with pytest.raises(StorageError):
+            manager.register_table(schema)
+
+        assert list(engine.scan("__catalog__")) == []
+    finally:
+        engine.close()
+
+
+@pytest.mark.parametrize(
+    ("corruption", "cause_type"),
+    [
+        ("invalid-utf8", UnicodeDecodeError),
+        ("invalid-slot-count", struct.error),
+        ("missing-declared-page", ValueError),
+    ],
+)
+def test_load_wraps_catalog_scan_and_decode_corruption(
+    tmp_path: Path, corruption: str, cause_type: type[Exception]
+) -> None:
+    engine = StorageEngine(str(tmp_path))
+    manager = CatalogManager(engine)
+    manager.load()
+    if corruption != "missing-declared-page":
+        schema = student_schema()
+        engine.create_table(schema)
+        manager.register_table(schema)
+    engine.close()
+
+    catalog_path = tmp_path / "__catalog__.dat"
+    with catalog_path.open("r+b") as catalog_file:
+        if corruption == "invalid-utf8":
+            catalog_file.seek(PAGE_SIZE + 32)
+            (row_offset,) = struct.unpack("<H", catalog_file.read(2))
+            catalog_file.seek(PAGE_SIZE + row_offset)
+            catalog_file.write(b"\xff")
+        elif corruption == "invalid-slot-count":
+            catalog_file.seek(PAGE_SIZE + 5)
+            catalog_file.write(struct.pack("<H", 65535))
+        else:
+            catalog_file.seek(8)
+            catalog_file.write(struct.pack("<I", 2))
+
+    reopened = StorageEngine(str(tmp_path))
+    try:
+        with pytest.raises(StorageError, match="__catalog__") as caught:
+            CatalogManager(reopened).load()
+        assert isinstance(caught.value.__cause__, cause_type)
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    "read_error",
+    [OSError("disk read failed"), StorageError("page read failed")],
+    ids=["os-error", "storage-error"],
+)
+def test_load_adds_catalog_context_to_storage_read_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read_error: Exception
+) -> None:
+    engine = StorageEngine(str(tmp_path))
+    manager = CatalogManager(engine)
+    manager.load()
+
+    def broken_scan(table: str):
+        assert table == "__catalog__"
+        raise read_error
+        yield
+
+    monkeypatch.setattr(engine, "scan", broken_scan)
+    try:
+        with pytest.raises(StorageError, match="__catalog__") as caught:
+            manager.load()
+        assert caught.value.__cause__ is read_error
+    finally:
+        engine.close()
