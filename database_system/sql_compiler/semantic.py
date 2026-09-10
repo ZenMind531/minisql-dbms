@@ -8,7 +8,8 @@ keyed by column name; AST column names themselves remain unchanged.
 from database_system.sql_compiler.ast_nodes import (
     ASTNode, BinaryExpr, BinaryOperator, ColumnDef, CreateTableStmt, DeleteStmt,
     Expr, IdentifierExpr, InsertStmt, LiteralExpr, LiteralKind, SelectStmt,
-    Stmt, TypeKind, TypeSpec, UnaryExpr, UnaryOperator,
+    ShowDatabasesStmt, ShowTablesStmt, Stmt, TypeKind, TypeSpec, UnaryExpr,
+    UnaryOperator,
 )
 from database_system.sql_compiler.catalog import Catalog
 from database_system.utils.errors import SemanticError
@@ -60,6 +61,8 @@ class SemanticAnalyzer:
             # the table in the live catalog (execution owns that side effect).
             Catalog().create_table(stmt.table, stmt.columns)
             return stmt
+        if isinstance(stmt, (ShowDatabasesStmt, ShowTablesStmt)):
+            return stmt
         if not isinstance(stmt, (SelectStmt, InsertStmt, DeleteStmt)):
             raise self._error(stmt, f"unsupported statement: {type(stmt).__name__}")
         schema = self.catalog.find_table(stmt.table)
@@ -72,6 +75,8 @@ class SemanticAnalyzer:
                 names = stmt.columns if stmt.columns is not None else [c.name for c in schema.columns]
                 for name in names:
                     self._bind(stmt.table, name, stmt)
+                for item in stmt.order_by:
+                    self._bind(stmt.table, item.column_name, item)
             if stmt.where is not None:
                 result = self._expression(stmt.where, stmt.table)
                 if result.kind is not TypeKind.BOOL:

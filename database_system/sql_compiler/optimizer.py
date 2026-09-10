@@ -43,6 +43,7 @@ from database_system.sql_compiler.ast_nodes import (
 )
 from database_system.sql_compiler.planner import (
     CreateTable, Delete, Filter, Insert, PlanNode, Project, SeqScan,
+    ShowDatabases, ShowTables, Sort,
 )
 
 
@@ -128,9 +129,12 @@ class Optimizer:
             return self._optimize_filter(plan)
         if isinstance(plan, Project):
             return self._optimize_project(plan)
+        if isinstance(plan, Sort):
+            return Sort(list(plan.items), self._optimize_plan(plan.child))
         if isinstance(plan, Delete):
             return Delete(plan.table, self._optimize_plan(plan.child))
-        if isinstance(plan, (SeqScan, CreateTable, Insert)):
+        if isinstance(plan, (SeqScan, CreateTable, Insert,
+                             ShowDatabases, ShowTables)):
             # Leaf nodes hold no predicate and no child to rewrite.
             return plan
         raise TypeError(f"unsupported plan type: {type(plan).__name__}")

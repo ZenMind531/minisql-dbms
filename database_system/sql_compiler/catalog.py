@@ -84,5 +84,12 @@ class Catalog:
         definition = self.find_column(table, column)
         return definition.type_spec if definition is not None else None
 
+    def table_names(self, *, include_system: bool = True) -> list[str]:
+        names = self._tables
+        if not include_system:
+            names = {name: schema for name, schema in names.items()
+                     if not name.startswith("__")}
+        return sorted(names)
+
 
 __all__ = ["Catalog", "TableSchema"]

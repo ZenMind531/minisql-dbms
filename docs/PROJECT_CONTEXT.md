@@ -410,3 +410,21 @@ Parser 未出现 `LexError`/`ParseError` 以外的异常，意外崩溃数为 0�
 
 下一步引擎工作是补齐 `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql`，完成
 quickstart 的百行插入、条件查询、删除和再次重启验收。
+
+## 20. SHOW 与多列 ORDER BY（2026-09-10）
+
+- 按当前需求暂停原 Task 3 的端到端案例工作，先扩展常用 SQL 语法。
+- 新增 `SHOW DATABASES;`：当前实现只返回 `--data` 目录名称；使用独立 AST、
+  Plan 节点，为后续接入多个数据库及切换能力保留扩展入口。
+- 新增 `SHOW TABLES;`：返回当前数据库的用户表，按表名升序排列，并隐藏内部
+  `__catalog__` 表。
+- SELECT 新增多列排序：`ORDER BY column [ASC|DESC], ...`。省略方向时默认
+  `ASC`，每个排序项可独立选择方向。
+- Sort 位于 Project 之前，因此允许按未出现在 SELECT 投影列表中的列排序；
+  SemanticAnalyzer 仍会检查每个排序列确实存在。
+- 本轮明确不实现 `JOIN` 和 `LIMIT`。文法、Lexer、AST、Parser、Semantic、
+  Planner、Optimizer、Executor、README 与设计文档已同步。
+- 新增 `tests/test_show_order.py`，覆盖关键字大小写、SHOW AST、默认/显式方向、
+  多列混合排序、未投影排序列、未知排序列以及 SHOW 执行结果。
+- 完整 pytest 回归为 **211 项测试、162 个 subtests 全部通过**（CPython
+  3.11.16）。

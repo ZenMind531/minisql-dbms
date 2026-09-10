@@ -1,6 +1,6 @@
 # MiniSQL SQL 子集文法
 
-本文档是 MiniSQL 语法分析器的唯一文法准绳。`lexer.py`、`parser.py`、AST 定义和相关测试必须与本文同步。本文只定义课程必做的 CREATE TABLE、INSERT、SELECT、DELETE；UPDATE、JOIN、ORDER BY、GROUP BY、NULL 等不在当前范围内。
+本文档是 MiniSQL 语法分析器的唯一文法准绳。`lexer.py`、`parser.py`、AST 定义和相关测试必须与本文同步。本文定义 CREATE TABLE、INSERT、SELECT、DELETE、SHOW，以及 SELECT 的多列 ORDER BY；UPDATE、JOIN、LIMIT、GROUP BY、NULL 等不在当前范围内。
 
 ## 1. 记号约定
 
@@ -26,7 +26,8 @@ statement_list      ::= statement ";" { statement ";" } ;
 statement           ::= create_table_statement
                       | insert_statement
                       | select_statement
-                      | delete_statement ;
+                      | delete_statement
+                      | show_statement ;
 ```
 
 规则说明：
@@ -94,10 +95,13 @@ INSERT INTO student VALUES (2, 'Bob', 17);
 
 ```ebnf
 select_statement    ::= SELECT select_list FROM IDENTIFIER
-                        [ WHERE expression ] ;
+                        [ WHERE expression ] [ order_by_clause ] ;
 
 select_list         ::= "*"
                       | identifier_list ;
+
+order_by_clause     ::= ORDER BY order_by_item { "," order_by_item } ;
+order_by_item       ::= IDENTIFIER [ ASC | DESC ] ;
 ```
 
 语法与边界：
@@ -106,15 +110,27 @@ select_list         ::= "*"
 - 投影项只能是 `*` 或一个非空列名列表，不支持在 SELECT 列表中书写任意表达式。
 - `WHERE` 后必须有表达式；该表达式最终必须具有 BOOL 类型，此规则由 SemanticAnalyzer 检查。
 - 表和列是否存在由 SemanticAnalyzer 检查。
+- ORDER BY 支持多个列；省略方向或 ASC 表示升序，DESC 表示降序。
+- 排序发生在投影之前，排序列可以不出现在 SELECT 列表中。
 
 示例：
 
 ```sql
 SELECT * FROM student;
 SELECT id, name FROM student WHERE age > 18 AND id != 3;
+SELECT name FROM student ORDER BY age DESC, name ASC;
 ```
 
-## 6. DELETE
+## 6. SHOW
+
+```ebnf
+show_statement      ::= SHOW DATABASES | SHOW TABLES ;
+```
+
+- SHOW DATABASES 显示当前 `--data` 目录名称。
+- SHOW TABLES 按名称升序显示用户表，不显示内部 `__catalog__`。
+
+## 7. DELETE
 
 ```ebnf
 delete_statement    ::= DELETE FROM IDENTIFIER [ WHERE expression ] ;
@@ -133,7 +149,7 @@ DELETE FROM student WHERE id = 1;
 DELETE FROM student;
 ```
 
-## 7. 表达式
+## 8. 表达式
 
 表达式从低到高的完整优先级为：
 
@@ -207,7 +223,7 @@ BinaryExpr(AND)
 
 Parser 只负责按文法构造 AST。诸如对 VARCHAR 使用算术运算、WHERE 结果不是 BOOL 等问题由 SemanticAnalyzer 按集中类型规则报告。
 
-## 8. 词法规则
+## 9. 词法规则
 
 ### 8.1 关键字
 
@@ -215,6 +231,7 @@ Parser 只负责按文法构造 AST。诸如对 VARCHAR 使用算术运算、WHE
 SELECT  FROM    WHERE   CREATE  TABLE
 INSERT  INTO    VALUES  DELETE  AND
 OR      NOT     INT     VARCHAR
+SHOW    DATABASES TABLES ORDER BY ASC DESC
 ```
 
 关键字匹配大小写不敏感，例如 `select`、`SELECT` 和 `SeLeCt` 产生同一种关键字 Token。标识符和字符串内容必须保留源码中的原始内容。
@@ -283,7 +300,7 @@ block_comment       ::= "/*" { block_comment_character } "*/" ;
 - EOF 前未找到 `*/` 时抛出 LexError，位置指向注释起始处。
 - 注释标记出现在字符串中时只是字符串内容。
 
-## 9. 错误要求
+## 10. 错误要求
 
 ### 9.1 词法错误
 
@@ -324,7 +341,7 @@ Parser 只判断 Token 序列是否符合本文文法。以下问题交给 Seman
 - WHERE 表达式结果不是 BOOL。
 - VARCHAR 值按 UTF-8 编码后的字节数超过列定义长度。
 
-## 10. Parser 实现映射
+## 11. Parser 实现映射
 
 递归下降 Parser 应让函数层次直接对应文法层次，建议至少包含：
 
@@ -335,6 +352,8 @@ parse_create_table
 parse_insert
 parse_select
 parse_delete
+parse_show
+parse_order_by
 parse_expression
 parse_or
 parse_and

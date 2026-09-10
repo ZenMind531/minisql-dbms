@@ -12,7 +12,8 @@ from typing import Any, TypeAlias
 
 from database_system.sql_compiler.ast_nodes import (
     BinaryExpr, CreateTableStmt, DeleteStmt, Expr, IdentifierExpr, InsertStmt,
-    LiteralExpr, SelectStmt, Stmt, UnaryExpr,
+    LiteralExpr, OrderByItem, SelectStmt, ShowDatabasesStmt, ShowTablesStmt,
+    Stmt, UnaryExpr,
 )
 
 
@@ -34,6 +35,22 @@ class Project:
 
 
 @dataclass(slots=True)
+class Sort:
+    items: list[OrderByItem]
+    child: "PlanNode"
+
+
+@dataclass(slots=True)
+class ShowDatabases:
+    pass
+
+
+@dataclass(slots=True)
+class ShowTables:
+    pass
+
+
+@dataclass(slots=True)
 class Delete:
     table: str
     child: "PlanNode"
@@ -51,7 +68,10 @@ class Insert:
     rows: list[Any]
 
 
-PlanNode: TypeAlias = SeqScan | Filter | Project | Delete | CreateTable | Insert
+PlanNode: TypeAlias = (
+    SeqScan | Filter | Project | Sort | Delete | CreateTable | Insert
+    | ShowDatabases | ShowTables
+)
 
 
 class Planner:
@@ -69,12 +89,18 @@ class Planner:
             child: PlanNode = SeqScan(stmt.table)
             if stmt.where is not None:
                 child = Filter(stmt.where, child)
+            if stmt.order_by:
+                child = Sort(list(stmt.order_by), child)
             return Project(stmt.columns, child)
         if isinstance(stmt, DeleteStmt):
             child: PlanNode = SeqScan(stmt.table)
             if stmt.where is not None:
                 child = Filter(stmt.where, child)
             return Delete(stmt.table, child)
+        if isinstance(stmt, ShowDatabasesStmt):
+            return ShowDatabases()
+        if isinstance(stmt, ShowTablesStmt):
+            return ShowTables()
         raise TypeError(f"unsupported statement type: {type(stmt).__name__}")
 
 
@@ -136,6 +162,20 @@ def plan_to_json(plan: PlanNode) -> dict[str, Any]:
             "columns": None if plan.columns is None else list(plan.columns),
             "child": plan_to_json(plan.child),
         }
+    if isinstance(plan, Sort):
+        return {
+            "type": "Sort",
+            "items": [
+                {"column": item.column_name,
+                 "direction": "DESC" if item.descending else "ASC"}
+                for item in plan.items
+            ],
+            "child": plan_to_json(plan.child),
+        }
+    if isinstance(plan, ShowDatabases):
+        return {"type": "ShowDatabases"}
+    if isinstance(plan, ShowTables):
+        return {"type": "ShowTables"}
     if isinstance(plan, Delete):
         return {
             "type": "Delete",
@@ -179,6 +219,16 @@ def _node_label(plan: PlanNode) -> str:
     if isinstance(plan, Project):
         columns = "*" if plan.columns is None else ", ".join(plan.columns)
         return f"Project({columns})"
+    if isinstance(plan, Sort):
+        items = ", ".join(
+            f"{item.column_name} {'DESC' if item.descending else 'ASC'}"
+            for item in plan.items
+        )
+        return f"Sort({items})"
+    if isinstance(plan, ShowDatabases):
+        return "ShowDatabases"
+    if isinstance(plan, ShowTables):
+        return "ShowTables"
     if isinstance(plan, Delete):
         return f"Delete({plan.table})"
     if isinstance(plan, CreateTable):
@@ -194,7 +244,7 @@ def _node_label(plan: PlanNode) -> str:
 
 
 def _child(plan: PlanNode) -> PlanNode | None:
-    if isinstance(plan, (Filter, Project, Delete)):
+    if isinstance(plan, (Filter, Project, Sort, Delete)):
         return plan.child
     return None
 
@@ -223,5 +273,6 @@ def plan_to_tree(plan: PlanNode) -> str:
 
 __all__ = [
     "CreateTable", "Delete", "Filter", "Insert", "PlanNode", "Planner",
-    "Project", "SeqScan", "plan_to_json", "plan_to_tree",
+    "Project", "SeqScan", "ShowDatabases", "ShowTables", "Sort",
+    "plan_to_json", "plan_to_tree",
 ]

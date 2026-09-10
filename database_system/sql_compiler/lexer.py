@@ -22,6 +22,13 @@ KEYWORDS = frozenset(
         "NOT",
         "INT",
         "VARCHAR",
+        "SHOW",
+        "DATABASES",
+        "TABLES",
+        "ORDER",
+        "BY",
+        "ASC",
+        "DESC",
     }
 )
 

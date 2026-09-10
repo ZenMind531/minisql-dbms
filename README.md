@@ -1,8 +1,9 @@
 # MiniSQL 教学数据库系统
 
 MiniSQL 是一个使用 Python 3.11 和标准库实现的教学型关系数据库。当前 SQL
-子集支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`，以及包含比较、
-`NOT`、`AND`、`OR` 和括号的 `WHERE` 表达式。
+子集支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`、`SHOW DATABASES`、
+`SHOW TABLES`，以及包含比较、`NOT`、`AND`、`OR` 和括号的 `WHERE` 表达式。
+SELECT 还支持多列 `ORDER BY`，每列可使用 `ASC` 或 `DESC`，默认升序。
 
 ## 编译器前端
 
@@ -16,7 +17,7 @@ SQL 文本 → Lexer → Token 列表 → Parser → AST
   带行列号的 `LexError`。
 - `database_system/sql_compiler/parser.py`：按照 `docs/grammar.md` 进行递归下降
   解析，构造 AST，报告包含实际 Token 与 expected 集合的 `ParseError`。
-- `database_system/sql_compiler/ast_nodes.py`：四类语句和表达式 AST 的稳定接口。
+- `database_system/sql_compiler/ast_nodes.py`：语句、排序项和表达式 AST 接口。
 
 文法唯一准绳是 `docs/grammar.md`，AST 与 Parser 的设计说明见
 `docs/design.md`。
@@ -46,6 +47,14 @@ bash start.sh
 ```
 
 进入 `MiniDB>` 后，每条 SQL 必须以分号结束；输入 `exit;` 退出。
+
+常用查询示例：
+
+```sql
+SHOW DATABASES;
+SHOW TABLES;
+SELECT name FROM student ORDER BY age DESC, name ASC;
+```
 
 ## 启动模式
 
@@ -125,5 +134,6 @@ python -m database_system.sql_compiler.demo --compile-only tests/sql/demo_compil
 
 ## 当前范围
 
-系统面向单用户、单进程教学场景。`UPDATE`、`JOIN`、`ORDER BY`、
-`GROUP BY`、事务和索引不属于当前必做范围。
+系统面向单用户、单进程教学场景。目前只显示当前数据库，但 SHOW AST 和目录
+入口已为后续多数据库切换保留扩展空间。`UPDATE`、`JOIN`、`LIMIT`、
+`GROUP BY`、事务和索引不属于当前范围。
