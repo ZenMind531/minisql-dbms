@@ -4,6 +4,28 @@ MiniSQL 是一个使用 Python 3.11 和标准库实现的教学型关系数据�
 子集支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`，以及包含比较、
 `NOT`、`AND`、`OR` 和括号的 `WHERE` 表达式。
 
+## 快速开始
+
+一条命令装好环境（自动建虚拟环境、装 pytest、生成 `minidb` 快捷命令）：
+
+```bash
+git clone https://github.com/ZenMind531/minisql-dbms.git && cd minisql-dbms && ./install.sh
+```
+
+装完在任意目录敲 `minidb` 进入交互式命令行：
+
+```sql
+MiniDB> CREATE TABLE student(id INT, name VARCHAR(32), age INT);
+MiniDB> INSERT INTO student VALUES (1, 'Alice', 20);
+MiniDB> SELECT * FROM student WHERE age > 18;
+MiniDB> exit;
+```
+
+数据文件存放在 `data/` 目录，退出时自动落盘。
+
+> **当前限制**：表结构的持久化（CatalogManager）尚未接通，因此重启后
+> 需要重新 `CREATE TABLE`；磁盘上的 `.dat` 数据文件本身是保留的。
+
 ## 编译器前端
 
 编译器数据流如下：
