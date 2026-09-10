@@ -54,5 +54,5 @@ class MiniDB:
         return _format(self.executor.execute(plan))
 
     def close(self) -> None:
-        """退出前把脏页落盘。"""
-        self.engine.flush()
+        """退出前把脏页落盘并关闭表文件。"""
+        self.engine.close()

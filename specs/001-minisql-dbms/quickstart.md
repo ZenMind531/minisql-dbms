@@ -2,23 +2,36 @@
 
 ## 环境准备
 
+Windows PowerShell：
+
+```powershell
+cd <repo 根目录>
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+Linux：
+
 ```bash
 cd <repo 根目录>
-python --version          # 需 3.11
-uv pip install pytest     # 或 pip install pytest
+bash install.sh
 ```
 
 ## 跑测试（每阶段验收入口）
 
-```bash
-pytest tests/ -v                    # 全部
-pytest tests/test_lexer.py -v       # 单模块
+```powershell
+# Windows
+.\.venv\Scripts\python.exe -m pytest tests -v
+
+# Linux
+./.venv/bin/python -m pytest tests -v
 ```
 
 ## 编译器演示（US1 验收）
 
-```bash
-python -m database_system.cli.main --compile-only tests/sql/demo_compiler.sql
+```powershell
+.\start.ps1 --compile-only tests/sql/demo_compiler.sql   # Windows
+bash start.sh --compile-only tests/sql/demo_compiler.sql # Linux
 # 依次打印每条 SQL 的 Token 流 → AST → 语义 OK → Plan(树形) → 优化后 Plan
 ```
 
@@ -34,8 +47,9 @@ pytest tests/test_storage.py tests/test_buffer.py -v
 
 ## 端到端演示（US3 验收，即报告附录演示 SQL）
 
-```bash
-python -m database_system.cli.main --file tests/sql/demo_e2e.sql --data ./tmp/minidb
+```powershell
+.\start.ps1 --file tests/sql/demo_e2e.sql --data .\tmp\minidb   # Windows
+bash start.sh --file tests/sql/demo_e2e.sql --data ./tmp/minidb # Linux
 ```
 
 `demo_e2e.sql` 内容：
@@ -65,7 +79,8 @@ OK
 
 ## 持久化验证
 
-```bash
-python -m database_system.cli.main --data ./tmp/minidb
+```powershell
+.\start.ps1 --data .\tmp\minidb   # Windows
+bash start.sh --data ./tmp/minidb # Linux
 MiniDB> SELECT * FROM student;    # 应返回 Bob、Tom 两行及全部三列，证明重启后数据在
 ```

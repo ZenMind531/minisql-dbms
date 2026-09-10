@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# MiniSQL 一键安装：自动准备环境 + 装测试依赖
-# 用法：在 minisql-dbms 根目录执行  ./install.sh
-# 目标：一条命令跑完。能自动处理的绝不让用户手动来。
+# MiniSQL Linux 环境初始化：创建 Python 3.11 虚拟环境并安装 pytest。
 set -e
 
 cd "$(dirname "$0")"
@@ -11,8 +9,8 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "错误：找不到 python3，请先安装 Python 3.11+" >&2
     exit 1
 fi
-if ! python3 -c 'import sys; exit(sys.version_info < (3, 11))'; then
-    echo "错误：需要 Python 3.11+，当前 $(python3 --version)" >&2
+if ! python3 -c 'import sys; exit(sys.version_info[:2] != (3, 11))'; then
+    echo "错误：需要 Python 3.11，当前 $(python3 --version)" >&2
     exit 1
 fi
 
@@ -31,15 +29,6 @@ fi
 
 echo "==> 安装测试依赖 ..."
 ./.venv/bin/pip install --quiet pytest
-
-echo "==> 创建快捷命令 minidb ..."
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/minidb" <<EOF
-#!/usr/bin/env bash
-cd "$PROJECT_DIR" && exec ./.venv/bin/python -m database_system.cli.main
-EOF
-chmod +x "$HOME/.local/bin/minidb"
 
 # ---- 成功动画：MiniDB 大字 logo 逐行点亮（树莓派风格）----
 green=$'\033[32m'; bold=$'\033[1m'; reset=$'\033[0m'
@@ -63,5 +52,5 @@ LOGO
 sleep 0.2
 printf "${bold}${green}  ✅ MiniDB 安装成功！${reset}\n"
 echo ""
-echo "  任意目录敲 minidb 进入数据库"
-echo "  跑全部测试:    ./.venv/bin/python -m pytest"
+echo "  启动数据库: ./start.sh"
+echo "  跑全部测试: ./.venv/bin/python -m pytest tests -v"

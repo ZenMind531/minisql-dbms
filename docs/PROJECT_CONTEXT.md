@@ -372,3 +372,20 @@ Parser 未出现 `LexError`/`ParseError` 以外的异常，意外崩溃数为 0�
 
 仓库当前跟踪了部分 `__pycache__/*.pyc` 文件。执行测试会改变这些生成文件，
 但它们不是源码变更，后续应由仓库维护者统一从版本控制中移除。
+
+## 18. CLI 与 Python 3.11 环境补充（2026-09-10）
+
+- `database_system/cli/main.py` 已支持无参数 REPL、`--file SQL_FILE`、
+  `--data DIRECTORY`、`--compile-only SQL_FILE` 和 `--help`。批处理读取失败或
+  SQL 诊断返回非零退出码且不打印 traceback。
+- 新增 `tests/test_cli.py`，覆盖帮助、脚本执行、指定数据目录、编译模式不创建
+  数据目录及文件读取错误，共 4 项。
+- `StorageEngine.close()` 会先 flush 再关闭所有 `FileManager`，避免 CLI 退出后
+  遗留文件句柄。该项及 `cli/main.py` 属成员 D 范围，需要 D 复核。
+- 新增 Windows 的 `install.ps1` / `start.ps1` 和 Linux 的 `start.sh`；
+  `install.sh` 固定检查 Python 3.11。README 与 quickstart 已补齐两个平台的
+  安装、交互、脚本、编译和测试命令。
+- 已在隔离的 CPython 3.11.16 + pytest 9.1.1 环境运行完整测试：
+  **180 项测试、162 个 subtests 全部通过**。
+- 当前仍未实现 CatalogManager，重启后恢复表结构仍是端到端验收阻塞；
+  `tests/test_engine.py`、`tests/test_e2e.py` 和 `tests/sql/demo_e2e.sql` 仍待补。

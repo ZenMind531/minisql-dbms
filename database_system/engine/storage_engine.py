@@ -137,3 +137,10 @@ class StorageEngine:
     def flush(self) -> None:
         for _, pool in self._open_tables.values():
             pool.flush_all()
+
+    def close(self) -> None:
+        """Flush buffered pages and close every table file."""
+        for manager, pool in self._open_tables.values():
+            pool.flush_all()
+            manager.close()
+        self._open_tables.clear()
