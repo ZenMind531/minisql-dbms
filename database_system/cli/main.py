@@ -8,10 +8,19 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+try:
+    import readline  # noqa: F401  Linux/macOS 标准库自带；Windows 上没有
+except ImportError:  # pragma: no cover - 平台差异
+    readline = None
+
 from database_system.cli.banner import show_banner, show_farewell
 from database_system.engine.minidb import MiniDB
 from database_system.sql_compiler.demo import compile_sql
 from database_system.utils.errors import MiniSQLError
+
+# 上下键翻出来的历史存这里，对标 MySQL 的 ~/.mysql_history
+HISTORY_FILE = Path.home() / ".minidb_history"
+HISTORY_LIMIT = 1000
 
 
 def _argument_parser() -> argparse.ArgumentParser:
@@ -48,26 +57,60 @@ def _read_sql_file(path: str) -> str:
         raise ValueError(f"无法读取 SQL 文件 {path}: {reason}") from error
 
 
+def _load_history() -> None:
+    """读回上次会话敲过的语句；第一次运行没有文件，安静跳过。
+
+    历史是锦上添花，读写失败一律咽掉——绝不能因为它让 REPL 起不来。
+    """
+    if readline is None:
+        return
+    try:
+        readline.read_history_file(HISTORY_FILE)
+    except OSError:
+        pass
+
+
+def _save_history() -> None:
+    """存下本次会话的语句，只留最近 HISTORY_LIMIT 条，免得文件无限长大。"""
+    if readline is None:
+        return
+    readline.set_history_length(HISTORY_LIMIT)
+    try:
+        readline.write_history_file(HISTORY_FILE)
+    except OSError:
+        pass
+
+
 def _run_repl(db: MiniDB) -> None:
+    # 历史只在真终端下读写：管道喂进来的输入不该混进历史，
+    # 而且非 tty 时 readline 本来也不接管输入。
+    interactive = sys.stdin.isatty()
+    if interactive:
+        _load_history()
     # 只在真终端里播启动动画；管道 / 重定向时保持输出干净
     if sys.stdout.isatty():
         show_banner()
-    while True:
-        try:
-            text = input("MiniDB> ")
-        except (EOFError, KeyboardInterrupt):
-            print()  # Ctrl+D / Ctrl+C：换行，别把提示符和 shell 黏在一起
-            break
-        # 退出统一走 exit; —— 和 SQL 一样必须带分号（关键词大小写不敏感）
-        if text.strip().lower() == "exit;":
-            break
-        # 空行不是语句，直接忽略（grammar.md：空输入解析为空语句列表）
-        if not text.strip():
-            continue
-        try:
-            print(db.execute(text))
-        except MiniSQLError as error:
-            print(error)  # 类型 + 行列号 + 原因；只废这一条，REPL 继续
+    try:
+        while True:
+            try:
+                text = input("MiniDB> ")
+            except (EOFError, KeyboardInterrupt):
+                print()  # Ctrl+D / Ctrl+C：换行，别把提示符和 shell 黏在一起
+                break
+            # 退出统一走 exit; —— 和 SQL 一样必须带分号（关键词大小写不敏感）
+            if text.strip().lower() == "exit;":
+                break
+            # 空行不是语句，直接忽略（grammar.md：空输入解析为空语句列表）
+            if not text.strip():
+                continue
+            try:
+                print(db.execute(text))
+            except MiniSQLError as error:
+                print(error)  # 类型 + 行列号 + 原因；只废这一条，REPL 继续
+    finally:
+        # 放在 finally 里：Ctrl+C 打断一条长查询时也得把这次敲的存下来
+        if interactive:
+            _save_history()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
