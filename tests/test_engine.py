@@ -11,7 +11,7 @@ from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind, TypeSpec
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import CreateTable
 from database_system.utils.constants import PAGE_SIZE
-from database_system.utils.errors import StorageError
+from database_system.utils.errors import ExecError, StorageError
 
 
 def column(name: str, kind: TypeKind, length: int | None = None) -> ColumnDef:
@@ -478,3 +478,57 @@ def test_executor_two_argument_constructor_remains_supported(tmp_path: Path) -> 
         assert catalog.find_table("student") == student_schema()
     finally:
         engine.close()
+
+
+# ---------- 执行器边界 ----------
+# 下面三条曾经都会穿透 MiniSQLError：两条崩掉整个 REPL，一条静默丢数据。
+# 语义层只管类型、不管取值范围与行宽，引擎层是最后一道防线。
+
+
+def test_drop_table_reports_exec_error_instead_of_crashing(tmp_path: Path) -> None:
+    """DROP TABLE 前端已能解析、执行器尚未实现，必须干净报错。
+
+    过去它掉进 execute() 的默认分支 _select()，_base_table() 访问 plan.child
+    时抛 AttributeError —— 不是 MiniSQLError，CLI 不接，整个 REPL 带
+    traceback 退出。
+    """
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE student(id INT);")
+
+        with pytest.raises(ExecError, match="DropTable"):
+            db.execute("DROP TABLE student;")
+
+        assert (tmp_path / "student.dat").is_file()  # 表还在，没被删掉
+    finally:
+        db.close()
+
+
+def test_insert_int_out_of_range_raises_storage_error(tmp_path: Path) -> None:
+    """INT 是 32 位有符号数；越界值过去会抛 struct.error 崩掉 REPL。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE student(id INT);")
+
+        with pytest.raises(StorageError, match="超出 INT 范围"):
+            db.execute("INSERT INTO student VALUES (4000000000);")
+
+        assert db.execute("SELECT * FROM student;") == ""
+    finally:
+        db.close()
+
+
+def test_insert_row_wider_than_a_page_raises_storage_error(tmp_path: Path) -> None:
+    """一行塞不满一个空页时必须报错；过去是谎报成功、静默丢数据。"""
+    columns = ", ".join(f"c{i} VARCHAR(255)" for i in range(1, 17))
+    values = ", ".join("'a'" for _ in range(16))
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute(f"CREATE TABLE wide({columns});")
+
+        with pytest.raises(StorageError, match="单页"):
+            db.execute(f"INSERT INTO wide VALUES ({values});")
+
+        assert db.execute("SELECT * FROM wide;") == ""
+    finally:
+        db.close()

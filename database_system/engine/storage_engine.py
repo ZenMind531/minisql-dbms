@@ -23,12 +23,17 @@ from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind
 from database_system.sql_compiler.catalog import TableSchema
 from database_system.storage.buffer import BufferPool
 from database_system.storage.file_manager import FileManager
+from database_system.storage.page import HEADER_SIZE, SLOT_SIZE
 from database_system.utils.constants import PAGE_SIZE
 from database_system.utils.errors import StorageError
 
 INT_FORMAT = "<i"
 INT_SIZE = 4
+INT_MIN = -2 ** 31
+INT_MAX = 2 ** 31 - 1
 FIRST_DATA_PAGE = 1  # 页 0 是文件头页，用户数据从页 1 开始
+# 一个空页装得下的最大行：整页去掉页头和一个槽位
+MAX_ROW_BYTES = PAGE_SIZE - HEADER_SIZE - SLOT_SIZE
 
 
 def _width(column: ColumnDef) -> int:
@@ -39,10 +44,21 @@ def _width(column: ColumnDef) -> int:
 
 
 def encode_row(row: tuple, columns: list[ColumnDef]) -> bytes:
-    """tuple → 定长字节串。调用前语义层已保证类型与长度合法。"""
+    """tuple → 定长字节串。语义层保证类型与 VARCHAR 长度，取值域在这层兜底。
+
+    语义分析只管类型、不管范围，而 struct.pack 越界抛的 struct.error 不是
+    MiniSQLError，会穿透 CLI 崩掉整个 REPL——所以边界必须在这里卡住。
+    """
     chunks = []
     for value, column in zip(row, columns):
         if column.type_spec.kind is TypeKind.INT:
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise StorageError(f"列 '{column.name}' 需要整数，收到 {value!r}")
+            if not INT_MIN <= value <= INT_MAX:
+                raise StorageError(
+                    f"列 '{column.name}' 的值 {value} 超出 INT 范围"
+                    f"（{INT_MIN} ~ {INT_MAX}）"
+                )
             chunks.append(struct.pack(INT_FORMAT, value))
         else:
             chunks.append(value.encode("utf-8").ljust(_width(column), b"\x00"))
@@ -150,6 +166,12 @@ class StorageEngine:
     def insert_row(self, table: str, row: tuple) -> None:
         schema = self._schema(table)
         data = encode_row(row, schema.columns)
+        # 比空页还宽的行，任何页都放不下。过去这里忽略 page.insert_row 的
+        # 返回值，于是谎报插入成功、数据静默丢失，还白白多开一页。
+        if len(data) > MAX_ROW_BYTES:
+            raise StorageError(
+                f"行宽 {len(data)} 字节超出单页上限 {MAX_ROW_BYTES} 字节"
+            )
         manager, pool = self._open(table)
         for page_id in range(FIRST_DATA_PAGE, manager.page_count()):
             page = pool.get_page(page_id)
