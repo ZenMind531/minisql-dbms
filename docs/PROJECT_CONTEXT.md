@@ -51,9 +51,19 @@ SQL → Lexer → Token → Parser → AST
 - AST、语义分析、Logical Plan、树形/JSON 输出和规则优化器均已接通。
 - SHOW 和多列 ORDER BY 已贯通 Lexer、AST、Parser、Semantic、Planner、
   Optimizer 与 Executor；Sort 位于 Project 之前，可按未投影列排序。
-- DROP TABLE、UPDATE、LIMIT 已完成成员 A 范围的关键字、AST、Parser 与前端
-  测试。新增 `DropTableStmt`、`Assignment`、`UpdateStmt`、`LimitClause`，其中
-  UPDATE 支持多列赋值和可选 WHERE，LIMIT 接受非负整数并位于 ORDER BY 后。
+- DROP TABLE、UPDATE、LIMIT 已完成语义分析和计划构建。新增 `DropTableStmt`、
+  `Assignment`、`UpdateStmt`、`LimitClause`，其中 UPDATE 支持多列赋值和可选 WHERE，
+  LIMIT 接受非负整数并位于 ORDER BY 后。
+  * DROP TABLE 语义检查目标表存在，禁止删除 `__catalog__` 系统表。
+  * UPDATE 语义检查表和列存在、赋值类型匹配、WHERE 为 BOOL 类型，明确拒绝同一列
+    重复赋值（报 SemanticError）。
+  * SELECT.limit 已由 Planner 正确传递，生成 Limit 计划节点。
+  * 新增计划节点：`DropTable`（表名）、`Update`（表名、有序 assignments、可选 Filter
+    子计划）、`Limit`（count、子计划）。
+  * SELECT 计划结构为 `Limit → Project → Sort → Filter → SeqScan`，保证先过滤、排序、
+    投影，最后截取前 N 行。
+  * Optimizer、plan_to_json()、plan_to_tree() 已更新支持新节点，不会报不支持错误。
+  * 新增 `tests/test_new_features.py` 含 20 个测试用例，覆盖语义分析和计划构建。
 - `tests/sql/compiler_cases.json` 含 34 个正常、词法、语法和语义案例。
 
 ### 存储与引擎
@@ -74,10 +84,10 @@ SQL → Lexer → Token → Parser → AST
 - T036 测试报告、T037 实习报告和 T039 最终验收彩排尚未完成。
 - SHOW / ORDER BY 是已实现扩展，但冻结的三份契约尚未同步这些新增节点；若要
   把扩展接口正式冻结，需要 B、C、D 与全组评审，成员 A 不单独改契约。
-- DROP TABLE / UPDATE / LIMIT 尚待 B 完成语义与计划、D 完成执行与目录/存储
-  集成；新增 AST 同样必须在端到端接入前由 B、D 与全组评审冻结。
-- 当前旧 Planner 尚不读取 `SelectStmt.limit`，所以 LIMIT 虽能解析，但通过
-  MiniDB 执行时可能被静默忽略；B 接入前不得将其视为有效的限行功能。
+- DROP TABLE / UPDATE / LIMIT 的语义分析和计划构建已完成，尚待 D 完成执行器集成。
+  新增 AST 和计划节点必须在端到端接入前由 D 与全组评审冻结。
+- LIMIT 现已正确传递到计划层，但执行器尚未实现 Limit 节点，所以通过 MiniDB 执行时
+  仍会返回全部行。UPDATE 和 DROP TABLE 的执行器实现也待 D 完成。
 
 ## 5. 关键设计决定
 
@@ -85,8 +95,9 @@ SQL → Lexer → Token → Parser → AST
 - 关键字大小写不敏感；标识符与字符串内容保持原样。
 - `VARCHAR(n)` 强制显式长度，`1 <= n <= 255`，按 UTF-8 字节数校验。
 - 表达式优先级见 `docs/grammar.md`；FLOAT 可进入 AST，但在语义阶段拒绝。
-- SELECT 计划为 `Project → Sort（可选）→ Filter（可选）→ SeqScan`；DELETE
-  计划为 `Delete → Filter（可选）→ SeqScan`。
+- SELECT 计划为 `Limit（可选）→ Project → Sort（可选）→ Filter（可选）→ SeqScan`；
+  DELETE 计划为 `Delete → Filter（可选）→ SeqScan`；UPDATE 计划为 `Update → Filter
+  （可选，作为子计划）`；DROP TABLE 计划为单节点 `DropTable`。
 - 优化器深拷贝输入，执行常量折叠、布尔化简和冗余节点消除；恒假 Filter
   必须保留，除法采用向零截断且除零表达式不折叠。
 - Page 固定 4096 字节、页头 32 字节；BufferPool 使用 `OrderedDict` 实现
@@ -102,17 +113,16 @@ SQL → Lexer → Token → Parser → AST
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-结果：`216 passed, 171 subtests passed`。其中成员 A 直接相关的 AST、Lexer、
-Parser、SHOW/ORDER BY 精简回归为 `47 passed, 24 subtests passed`。该结果覆盖当前已有测试，但不代表缺失的
-T028/T034 和 SC-006 已完成。
+结果：`236 passed` (含新增 20 个 DROP/UPDATE/LIMIT 测试)。该结果覆盖当前已有测试，
+但不代表缺失的 T028/T034 和 SC-006 已完成。
 
 ## 7. 下一步
 
 1. 先新增 `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql`，覆盖至少 100 行、
    条件查询、删除、关闭和重启恢复。
 2. 用 quickstart 完成三阶段验收，并整理 T036 测试报告。
-3. 由 B/D 接入 DROP TABLE、UPDATE、LIMIT 的语义、计划与执行，再由全组统一
-   评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
+3. 由 D 接入 DROP TABLE、UPDATE、LIMIT 的执行器实现，再由全组统一评审 SHOW、
+   ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
 4. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
 
 ## 8. 维护规则

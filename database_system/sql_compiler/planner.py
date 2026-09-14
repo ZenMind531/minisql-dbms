@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 from database_system.sql_compiler.ast_nodes import (
-    BinaryExpr, CreateTableStmt, DeleteStmt, Expr, IdentifierExpr, InsertStmt,
-    LiteralExpr, OrderByItem, SelectStmt, ShowDatabasesStmt, ShowTablesStmt,
-    Stmt, UnaryExpr,
+    Assignment, BinaryExpr, CreateTableStmt, DeleteStmt, DropTableStmt, Expr,
+    IdentifierExpr, InsertStmt, LiteralExpr, OrderByItem, SelectStmt,
+    ShowDatabasesStmt, ShowTablesStmt, Stmt, UnaryExpr, UpdateStmt,
 )
 
 
@@ -41,6 +41,12 @@ class Sort:
 
 
 @dataclass(slots=True)
+class Limit:
+    count: int
+    child: "PlanNode"
+
+
+@dataclass(slots=True)
 class ShowDatabases:
     pass
 
@@ -57,6 +63,18 @@ class Delete:
 
 
 @dataclass(slots=True)
+class DropTable:
+    table: str
+
+
+@dataclass(slots=True)
+class Update:
+    table: str
+    assignments: list[Assignment]
+    child: "PlanNode | None"
+
+
+@dataclass(slots=True)
 class CreateTable:
     table: str
     schema: list[Any]
@@ -69,8 +87,8 @@ class Insert:
 
 
 PlanNode: TypeAlias = (
-    SeqScan | Filter | Project | Sort | Delete | CreateTable | Insert
-    | ShowDatabases | ShowTables
+    SeqScan | Filter | Project | Sort | Limit | Delete | DropTable | Update
+    | CreateTable | Insert | ShowDatabases | ShowTables
 )
 
 
@@ -82,16 +100,27 @@ class Planner:
             # Keep ColumnDef objects in the plan for the executor, while
             # plan_to_json provides a stable metadata-only representation.
             return CreateTable(stmt.table, list(stmt.columns))
+        if isinstance(stmt, DropTableStmt):
+            return DropTable(stmt.table)
         if isinstance(stmt, InsertStmt):
             # One INSERT statement represents one row in the grammar.
             return Insert(stmt.table, [list(stmt.values)])
+        if isinstance(stmt, UpdateStmt):
+            child: PlanNode | None = None
+            if stmt.where is not None:
+                child = Filter(stmt.where, SeqScan(stmt.table))
+            return Update(stmt.table, list(stmt.assignments), child)
         if isinstance(stmt, SelectStmt):
+            # Build plan: Limit → Project → Sort → Filter → SeqScan
             child: PlanNode = SeqScan(stmt.table)
             if stmt.where is not None:
                 child = Filter(stmt.where, child)
             if stmt.order_by:
                 child = Sort(list(stmt.order_by), child)
-            return Project(stmt.columns, child)
+            child = Project(stmt.columns, child)
+            if stmt.limit is not None:
+                child = Limit(stmt.limit.count, child)
+            return child
         if isinstance(stmt, DeleteStmt):
             child: PlanNode = SeqScan(stmt.table)
             if stmt.where is not None:
@@ -172,6 +201,12 @@ def plan_to_json(plan: PlanNode) -> dict[str, Any]:
             ],
             "child": plan_to_json(plan.child),
         }
+    if isinstance(plan, Limit):
+        return {
+            "type": "Limit",
+            "count": plan.count,
+            "child": plan_to_json(plan.child),
+        }
     if isinstance(plan, ShowDatabases):
         return {"type": "ShowDatabases"}
     if isinstance(plan, ShowTables):
@@ -182,6 +217,20 @@ def plan_to_json(plan: PlanNode) -> dict[str, Any]:
             "table": plan.table,
             "child": plan_to_json(plan.child),
         }
+    if isinstance(plan, DropTable):
+        return {"type": "DropTable", "table": plan.table}
+    if isinstance(plan, Update):
+        result = {
+            "type": "Update",
+            "table": plan.table,
+            "assignments": [
+                {"column": a.column_name, "value": _expression_json(a.value)}
+                for a in plan.assignments
+            ],
+        }
+        if plan.child is not None:
+            result["child"] = plan_to_json(plan.child)
+        return result
     if isinstance(plan, CreateTable):
         return {"type": "CreateTable", "table": plan.table,
                 "schema": _schema_json(plan.schema)}
@@ -225,12 +274,22 @@ def _node_label(plan: PlanNode) -> str:
             for item in plan.items
         )
         return f"Sort({items})"
+    if isinstance(plan, Limit):
+        return f"Limit({plan.count})"
     if isinstance(plan, ShowDatabases):
         return "ShowDatabases"
     if isinstance(plan, ShowTables):
         return "ShowTables"
     if isinstance(plan, Delete):
         return f"Delete({plan.table})"
+    if isinstance(plan, DropTable):
+        return f"DropTable({plan.table})"
+    if isinstance(plan, Update):
+        assignments = ", ".join(
+            f"{a.column_name} = {_expression_text(a.value)}"
+            for a in plan.assignments
+        )
+        return f"Update({plan.table}, SET {assignments})"
     if isinstance(plan, CreateTable):
         schema = ", ".join(
             f"{c.name} {c.type_spec.kind.value}"
@@ -244,7 +303,9 @@ def _node_label(plan: PlanNode) -> str:
 
 
 def _child(plan: PlanNode) -> PlanNode | None:
-    if isinstance(plan, (Filter, Project, Sort, Delete)):
+    if isinstance(plan, (Filter, Project, Sort, Limit, Delete)):
+        return plan.child
+    if isinstance(plan, Update):
         return plan.child
     return None
 
@@ -272,7 +333,7 @@ def plan_to_tree(plan: PlanNode) -> str:
 
 
 __all__ = [
-    "CreateTable", "Delete", "Filter", "Insert", "PlanNode", "Planner",
-    "Project", "SeqScan", "ShowDatabases", "ShowTables", "Sort",
-    "plan_to_json", "plan_to_tree",
+    "CreateTable", "Delete", "DropTable", "Filter", "Insert", "Limit",
+    "PlanNode", "Planner", "Project", "SeqScan", "ShowDatabases", "ShowTables",
+    "Sort", "Update", "plan_to_json", "plan_to_tree",
 ]
