@@ -14,7 +14,8 @@ MiniSQL 是使用 Python 3.11 标准库实现的教学型关系数据库，面�
 - 4KB slotted page、LRU/FIFO 缓冲池和磁盘持久化；
 - REPL、SQL 文件执行和 `--compile-only` 编译器演示。
 
-`DROP TABLE`、`UPDATE`、`LIMIT` 当前只完成编译器前端，尚不能端到端执行。
+`DROP TABLE`、`UPDATE`、`LIMIT` 当前已完成词法、AST、语法、语义和逻辑计划，
+尚未接通执行器，不能端到端执行。
 `JOIN`、`GROUP BY`、事务、并发控制和索引不在当前范围。
 
 ## 2. 权威文档与优先级
@@ -80,9 +81,8 @@ SQL → Lexer → Token → Parser → AST
 
 ### 尚未完成的交付项
 
-- `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql` 尚未创建，正式 T028/T034
-  端到端验收仍未完成。
-- SC-006 要求的“插入至少 100 行后删除并重启验证”尚未形成版本库测试。
+- `tests/test_e2e.py`、`tests/sql/demo_e2e.sql` 和 SC-006 的 100 行删除重启验证
+  已进入版本库；仍需在最终验收环境按 quickstart 彩排并保存结果证据。
 - T036 整组测试报告、T037 实习报告和 T039 最终验收彩排尚未完成；存储模块的测试报告（`docs/T036-storage-test-report.md`）已产出。
 - 契约冲突待评审：契约写“存储错误抛 `StorageError`”，但 `FileManager.read_page` 的越界/坏 magic 需抛 `ValueError` 才能被引擎正确包装（`tests/test_engine.py` 依赖此行为）。详见 `docs/C-review-drop-update.md` 第 4 节。
 - SHOW / ORDER BY 是已实现扩展，但冻结的三份契约尚未同步这些新增节点；若要
@@ -121,18 +121,28 @@ SQL → Lexer → Token → Parser → AST
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-结果：`216 passed, 171 subtests passed`。其中成员 A 直接相关的 AST、Lexer、
-Parser、SHOW/ORDER BY 精简回归为 `47 passed, 24 subtests passed`。该结果覆盖当前已有测试，但不代表缺失的
-T028/T034 和 SC-006 已完成。
+结果：`246 passed, 171 subtests passed`。其中成员 A 直接相关的 AST、Lexer、
+Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。当前完整
+测试已包含 T028/T034、SC-006 以及新增语义和计划测试；尚未包含桌面 GUI 实现。
 
 ## 7. 下一步
 
-1. 先新增 `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql`，覆盖至少 100 行、
-   条件查询、删除、关闭和重启恢复。
-2. 用 quickstart 完成三阶段验收，并整理 T036 测试报告。
-3. 由 B/D 接入 DROP TABLE、UPDATE、LIMIT 的语义、计划与执行，再由全组统一
+1. 用 quickstart 完成三阶段验收，并整理 T036 整组测试报告。
+2. 由 D 接入 DROP TABLE、UPDATE、LIMIT 的执行器，再由全组统一
    评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
-4. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
+3. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
+4. 成员 D 复核桌面 GUI 的结构化执行接口后，按设计文档编写测试先行的实施计划。
+
+### 已批准的桌面 GUI 设计
+
+- 已批准使用 Python 3.11 标准库 `tkinter`/`ttk` 实现 SQL Studio 工作台；
+- 第一版采用左侧对象浏览器、右上 SQL 编辑器、右下结果/原始计划/优化后计划/
+  JSON/消息标签页，不提供增删改图形化表单；
+- 采用 Controller、单后台工作线程和结构化执行结果，保持现有
+  `MiniDB.execute()` 兼容；
+- 设计见 `docs/superpowers/specs/2026-09-14-minisql-desktop-gui-design.md`；
+- 实现前先由成员 D 复核新增 `MiniDB.execute_detailed()` 集成接口，再按测试先行
+  编写实施计划。
 
 ## 8. 维护规则
 
