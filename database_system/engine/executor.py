@@ -129,7 +129,12 @@ class Executor:
             return [(self.engine.data_dir.name or str(self.engine.data_dir),)]
         if isinstance(plan, ShowTables):
             return [(name,) for name in self.catalog.table_names(include_system=False)]
-        return self._select(plan)
+        if isinstance(plan, (SeqScan, Filter, Project, Sort)):
+            return self._select(plan)
+        # 前端解析得出来、执行器还没实现的节点（DropTable、Update 等）。
+        # 不能默认丢给 _select：那里要顺着 child 找 SeqScan，而这些节点
+        # 根本没有 child，抛出的 AttributeError 会穿透 CLI 崩掉整个 REPL。
+        raise ExecError(f"不支持的查询计划: {type(plan).__name__}")
 
     # ---------- 四种计划 ----------
     def _create_table(self, plan: CreateTable) -> str:

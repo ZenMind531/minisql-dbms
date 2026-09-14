@@ -94,7 +94,7 @@ description: "Task list for MiniSQL 教学数据库系统 (4-person team)"
 ### Tests（先写）⚠️
 
 - [x] T027 [P] [US3] 引擎测试 `tests/test_engine.py`：建表/插入/扫描/删除行数与内容断言（D）
-- [ ] T028 [P] [US3] 端到端测试 `tests/test_e2e.py`：demo_e2e.sql 输出逐行比对 + 重启持久化断言（D）
+- [x] T028 [P] [US3] 端到端测试 `tests/test_e2e.py`：demo_e2e.sql 输出逐行比对 + 重启持久化断言（D）
 
 ### Implementation
 
@@ -103,7 +103,7 @@ description: "Task list for MiniSQL 教学数据库系统 (4-person team)"
 - [x] T031 [US3] 实现 `database_system/engine/executor.py`：CreateTable/Insert/SeqScan/Filter/Project 算子执行（D）
 - [x] T032 [US3] 实现顶层编排 `MiniDB.execute()` 与 `database_system/cli/main.py`（REPL + `--file` + `--compile-only` + 退出 flush）（D）
 - [x] T033 [US3] 全员集成联调：编译器(A/B) × 引擎(D) × 存储(C) 接口对齐，修复集成问题（全员）
-- [ ] T034 [US3] `tests/sql/demo_e2e.sql` 定稿（quickstart 中七条演示 SQL + 重启验证步骤）（D）
+- [x] T034 [US3] `tests/sql/demo_e2e.sql` 定稿（quickstart 中七条演示 SQL + 重启验证步骤）（D）
 
 **Checkpoint**: 课程第三阶段验收标准达成 → 全组按教师验收形式彩排（随机讲解/现场改需求/现场 Debug）
 
