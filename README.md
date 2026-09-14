@@ -5,6 +5,11 @@ MiniSQL 是一个使用 Python 3.11 和标准库实现的教学型关系数据�
 `SHOW TABLES`，以及包含比较、`NOT`、`AND`、`OR` 和括号的 `WHERE` 表达式。
 SELECT 还支持多列 `ORDER BY`，每列可使用 `ASC` 或 `DESC`，默认升序。
 
+编译器前端还支持 `DROP TABLE`、`UPDATE` 和 `LIMIT`，目前已接通 Lexer、AST
+与 Parser。它们的 Semantic、Planner 和 Executor 尚未接入，因此暂时只能解析
+并查看 AST，不能作为 MiniDB 端到端功能使用；尤其 LIMIT 在 B 接入前可能被
+旧 Planner 忽略，不能用其执行结果判断限行是否生效。
+
 ## 快速开始
 
 一条命令装好环境（自动建虚拟环境、装 pytest、生成 `minidb` 快捷命令）：
@@ -76,6 +81,14 @@ bash start.sh
 SHOW DATABASES;
 SHOW TABLES;
 SELECT name FROM student ORDER BY age DESC, name ASC;
+```
+
+前端扩展语法示例：
+
+```sql
+DROP TABLE student;
+UPDATE student SET name = 'Alice', age = age + 1 WHERE id = 1;
+SELECT * FROM student ORDER BY age DESC LIMIT 10;
 ```
 
 ## 启动模式
@@ -157,5 +170,5 @@ python -m database_system.sql_compiler.demo --compile-only tests/sql/demo_compil
 ## 当前范围
 
 系统面向单用户、单进程教学场景。目前只显示当前数据库，但 SHOW AST 和目录
-入口已为后续多数据库切换保留扩展空间。`UPDATE`、`JOIN`、`LIMIT`、
-`GROUP BY`、事务和索引不属于当前范围。
+入口已为后续多数据库切换保留扩展空间。`DROP TABLE`、`UPDATE`、`LIMIT`
+当前仅属于编译器前端扩展；`JOIN`、`GROUP BY`、事务和索引不属于当前范围。

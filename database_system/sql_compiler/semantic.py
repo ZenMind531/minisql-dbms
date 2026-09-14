@@ -6,10 +6,10 @@ keyed by column name; AST column names themselves remain unchanged.
 """
 
 from database_system.sql_compiler.ast_nodes import (
-    ASTNode, BinaryExpr, BinaryOperator, ColumnDef, CreateTableStmt, DeleteStmt,
-    Expr, IdentifierExpr, InsertStmt, LiteralExpr, LiteralKind, SelectStmt,
-    ShowDatabasesStmt, ShowTablesStmt, Stmt, TypeKind, TypeSpec, UnaryExpr,
-    UnaryOperator,
+    ASTNode, Assignment, BinaryExpr, BinaryOperator, ColumnDef, CreateTableStmt,
+    DeleteStmt, DropTableStmt, Expr, IdentifierExpr, InsertStmt, LiteralExpr,
+    LiteralKind, SelectStmt, ShowDatabasesStmt, ShowTablesStmt, Stmt, TypeKind,
+    TypeSpec, UnaryExpr, UnaryOperator, UpdateStmt,
 )
 from database_system.sql_compiler.catalog import Catalog
 from database_system.utils.errors import SemanticError
@@ -61,15 +61,19 @@ class SemanticAnalyzer:
             # the table in the live catalog (execution owns that side effect).
             Catalog().create_table(stmt.table, stmt.columns)
             return stmt
+        if isinstance(stmt, DropTableStmt):
+            return self._drop_table(stmt)
         if isinstance(stmt, (ShowDatabasesStmt, ShowTablesStmt)):
             return stmt
-        if not isinstance(stmt, (SelectStmt, InsertStmt, DeleteStmt)):
+        if not isinstance(stmt, (SelectStmt, InsertStmt, DeleteStmt, UpdateStmt)):
             raise self._error(stmt, f"unsupported statement: {type(stmt).__name__}")
         schema = self.catalog.find_table(stmt.table)
         if schema is None:
             raise self._error(stmt, f"table '{stmt.table}' does not exist")
         if isinstance(stmt, InsertStmt):
             self._insert(stmt, schema.columns)
+        elif isinstance(stmt, UpdateStmt):
+            self._update(stmt, schema.columns)
         else:
             if isinstance(stmt, SelectStmt):
                 names = stmt.columns if stmt.columns is not None else [c.name for c in schema.columns]
@@ -82,6 +86,41 @@ class SemanticAnalyzer:
                 if result.kind is not TypeKind.BOOL:
                     raise self._error(stmt.where, "WHERE expression must have BOOL type")
         return stmt
+
+    def _drop_table(self, stmt: DropTableStmt) -> DropTableStmt:
+        """Validate DROP TABLE statement."""
+        if stmt.table == "__catalog__":
+            raise self._error(stmt, "cannot drop system catalog table '__catalog__'")
+        if self.catalog.find_table(stmt.table) is None:
+            raise self._error(stmt, f"table '{stmt.table}' does not exist")
+        return stmt
+
+    def _update(self, stmt: UpdateStmt, schema_columns: list[ColumnDef]) -> None:
+        """Validate UPDATE statement assignments and WHERE clause."""
+        # Check for duplicate column assignments
+        seen_columns = set()
+        for assignment in stmt.assignments:
+            if assignment.column_name in seen_columns:
+                raise self._error(assignment, f"duplicate assignment to column '{assignment.column_name}'")
+            seen_columns.add(assignment.column_name)
+            # Verify column exists and bind it
+            target = self._bind(stmt.table, assignment.column_name, assignment)
+            # Validate assignment expression type matches column type
+            actual = self._expression(assignment.value, stmt.table)
+            expected = target.type_spec
+            if actual.kind is not expected.kind:
+                raise self._error(assignment.value, f"column '{target.name}' expects {expected.kind}, got {actual.kind}")
+            if expected.kind is TypeKind.VARCHAR:
+                # For string literals, check length constraint
+                if isinstance(assignment.value, LiteralExpr) and assignment.value.literal_kind is LiteralKind.STRING:
+                    size = len(assignment.value.value.encode("utf-8"))
+                    if size > expected.length:
+                        raise self._error(assignment.value, f"column '{target.name}' allows {expected.length} UTF-8 bytes, got {size}")
+        # Validate WHERE clause if present
+        if stmt.where is not None:
+            result = self._expression(stmt.where, stmt.table)
+            if result.kind is not TypeKind.BOOL:
+                raise self._error(stmt.where, "WHERE expression must have BOOL type")
 
     def _insert(self, stmt: InsertStmt, schema_columns: list[ColumnDef]) -> None:
         targets = schema_columns

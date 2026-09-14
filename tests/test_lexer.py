@@ -23,7 +23,8 @@ class LexerBasicTests(unittest.TestCase):
     def test_recognizes_every_supported_keyword_case_insensitively(self) -> None:
         source = (
             "select FROM where CREATE table INSERT into VALUES delete "
-            "and OR not int varchar"
+            "and OR not int varchar show databases tables order by asc desc "
+            "drop UPDATE set limit"
         )
 
         tokens = Lexer(source).tokenize()
@@ -32,7 +33,7 @@ class LexerBasicTests(unittest.TestCase):
         self.assertTrue(all(token.type is TokenType.KEYWORD for token in tokens[:-1]))
         self.assertEqual(tokens[-1].type, TokenType.EOF)
         self.assertEqual(tokens[0].lexeme, "select")
-        self.assertEqual(tokens[-2].lexeme, "varchar")
+        self.assertEqual(tokens[-2].lexeme, "limit")
 
     def test_tracks_positions_across_whitespace_and_newlines(self) -> None:
         tokens = Lexer("CREATE TABLE\n  student (id INT)\r\n;").tokenize()

@@ -42,8 +42,8 @@ from database_system.sql_compiler.ast_nodes import (
     TypeSpec, UnaryExpr, UnaryOperator,
 )
 from database_system.sql_compiler.planner import (
-    CreateTable, Delete, Filter, Insert, PlanNode, Project, SeqScan,
-    ShowDatabases, ShowTables, Sort,
+    CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode, Project,
+    SeqScan, ShowDatabases, ShowTables, Sort, Update,
 )
 
 
@@ -131,9 +131,14 @@ class Optimizer:
             return self._optimize_project(plan)
         if isinstance(plan, Sort):
             return Sort(list(plan.items), self._optimize_plan(plan.child))
+        if isinstance(plan, Limit):
+            return Limit(plan.count, self._optimize_plan(plan.child))
         if isinstance(plan, Delete):
             return Delete(plan.table, self._optimize_plan(plan.child))
-        if isinstance(plan, (SeqScan, CreateTable, Insert,
+        if isinstance(plan, Update):
+            child = self._optimize_plan(plan.child) if plan.child is not None else None
+            return Update(plan.table, list(plan.assignments), child)
+        if isinstance(plan, (SeqScan, CreateTable, Insert, DropTable,
                              ShowDatabases, ShowTables)):
             # Leaf nodes hold no predicate and no child to rewrite.
             return plan

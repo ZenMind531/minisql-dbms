@@ -114,7 +114,9 @@ description: "Task list for MiniSQL 教学数据库系统 (4-person team)"
 - [x] T035 [P] 完善 `README.md`（构建/运行/演示命令）与 `docs/design.md`（AST/Catalog/Plan 结构说明）（A）
 - [ ] T036 [P] 整理测试报告：测试用例清单、运行结果截图/日志、失败案例分析（C）
 - [ ] T037 实习报告：关键设计决策、问题定位过程、AI 辅助使用说明、四人贡献说明（D 汇总，全员供稿）
-- [ ] T038 [P] 扩展项：ORDER BY 与固定种子 Fuzz 已完成；UPDATE、Plan 可视化未实现（认领制）
+- [ ] T038 [P] 扩展项：ORDER BY 已端到端完成；DROP TABLE、UPDATE、LIMIT 的
+  Lexer/AST/Parser 前端由 A 完成，Semantic/Plan/Executor 待 B/D 接入并经全组
+  契约评审；固定种子 Fuzz、Plan 可视化仍需单独验收（认领制）
 - [ ] T039 最终验收彩排：按 quickstart.md 全流程演示一遍，每人随机抽讲一个函数（全员）
 
 ---

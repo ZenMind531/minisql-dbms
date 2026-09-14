@@ -1,9 +1,10 @@
 # MiniSQL SQL 子集文法
 
 本文档是 MiniSQL 当前实现的 SQL 词法与语法准绳。`lexer.py`、`parser.py`、
-AST 定义和相关测试必须与本文同步。本文定义 CREATE TABLE、INSERT、SELECT、
-DELETE、SHOW，以及 SELECT 的多列 ORDER BY；UPDATE、JOIN、LIMIT、GROUP BY、
-NULL 等不在当前范围内。
+AST 定义和相关测试必须与本文同步。本文定义 CREATE TABLE、DROP TABLE、INSERT、
+UPDATE、SELECT、DELETE、SHOW，以及 SELECT 的多列 ORDER BY 和 LIMIT。JOIN、
+GROUP BY、NULL 等不在当前前端范围内。DROP TABLE、UPDATE、LIMIT 当前只完成
+Lexer、AST 与 Parser；语义、计划和执行由成员 B、D 后续接入。
 
 ## 1. 记号约定
 
@@ -27,7 +28,9 @@ program             ::= [ statement_list ] EOF ;
 statement_list      ::= statement ";" { statement ";" } ;
 
 statement           ::= create_table_statement
+                      | drop_table_statement
                       | insert_statement
+                      | update_statement
                       | select_statement
                       | delete_statement
                       | show_statement ;
@@ -68,6 +71,18 @@ type_specification  ::= INT
 CREATE TABLE student(id INT, name VARCHAR(32), age INT);
 ```
 
+### 3.1 DROP TABLE
+
+```ebnf
+drop_table_statement ::= DROP TABLE IDENTIFIER ;
+```
+
+只支持删除一张表，不支持 `IF EXISTS`、`CASCADE` 或一次删除多个表。
+
+```sql
+DROP TABLE student;
+```
+
 ## 4. INSERT
 
 ```ebnf
@@ -94,17 +109,39 @@ INSERT INTO student(id, name, age) VALUES (1, 'Alice', 20);
 INSERT INTO student VALUES (2, 'Bob', 17);
 ```
 
+### 4.1 UPDATE
+
+```ebnf
+update_statement    ::= UPDATE IDENTIFIER SET assignment
+                        { "," assignment } [ WHERE expression ] ;
+
+assignment          ::= IDENTIFIER "=" expression ;
+```
+
+- SET 至少包含一个赋值项，支持同时修改多列。
+- 赋值右侧复用统一表达式文法，例如 `age = age + 1`。
+- WHERE 可省略；省略时表示更新目标表的全部记录。
+- 列存在性、重复赋值和类型匹配由 SemanticAnalyzer 检查。
+
+```sql
+UPDATE student SET name = 'Alice', age = age + 1 WHERE id = 1;
+UPDATE student SET age = 20;
+```
+
 ## 5. SELECT
 
 ```ebnf
 select_statement    ::= SELECT select_list FROM IDENTIFIER
-                        [ WHERE expression ] [ order_by_clause ] ;
+                        [ WHERE expression ] [ order_by_clause ]
+                        [ limit_clause ] ;
 
 select_list         ::= "*"
                       | identifier_list ;
 
 order_by_clause     ::= ORDER BY order_by_item { "," order_by_item } ;
 order_by_item       ::= IDENTIFIER [ ASC | DESC ] ;
+
+limit_clause        ::= LIMIT INTEGER_LITERAL ;
 ```
 
 语法与边界：
@@ -115,6 +152,8 @@ order_by_item       ::= IDENTIFIER [ ASC | DESC ] ;
 - 表和列是否存在由 SemanticAnalyzer 检查。
 - ORDER BY 支持多个列；省略方向或 ASC 表示升序，DESC 表示降序。
 - 排序发生在投影之前，排序列可以不出现在 SELECT 列表中。
+- LIMIT 必须位于 ORDER BY 之后，只接受非负整数字面量；`LIMIT 0` 合法。
+- 不支持 OFFSET、逗号形式或使用表达式作为 LIMIT 数量。
 
 示例：
 
@@ -122,6 +161,7 @@ order_by_item       ::= IDENTIFIER [ ASC | DESC ] ;
 SELECT * FROM student;
 SELECT id, name FROM student WHERE age > 18 AND id != 3;
 SELECT name FROM student ORDER BY age DESC, name ASC;
+SELECT name FROM student ORDER BY age DESC LIMIT 10;
 ```
 
 ## 6. SHOW
@@ -235,6 +275,7 @@ SELECT  FROM    WHERE   CREATE  TABLE
 INSERT  INTO    VALUES  DELETE  AND
 OR      NOT     INT     VARCHAR
 SHOW    DATABASES TABLES ORDER BY ASC DESC
+DROP    UPDATE  SET     LIMIT
 ```
 
 关键字匹配大小写不敏感，例如 `select`、`SELECT` 和 `SeLeCt` 产生同一种关键字 Token。标识符和字符串内容必须保留源码中的原始内容。
@@ -352,14 +393,18 @@ Parser 只判断 Token 序列是否符合本文文法。以下问题交给 Seman
 parse
 _parse_statement
 _parse_create_table
+_parse_drop_table
 _parse_column_definition
 _parse_type_specification
 _parse_insert
+_parse_update
+_parse_assignment
 _parse_select
 _parse_delete
 _parse_show
 _parse_order_by
 _parse_order_item
+_parse_limit
 _parse_identifier_list
 _parse_expression_list
 _parse_expression
