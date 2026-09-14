@@ -59,3 +59,26 @@ def test_free_reuse_and_restart(tmp_path):
       fm2 = FileManager(path)              # 模拟重启
       assert fm2.page_count() == 4
       assert fm2.allocate_page() == 2      # 复用了被释放的页 2
+
+def test_update_row_same_length_in_place():
+    page = Page(page_id=11)
+    page.insert_row(b"old1")
+    page.insert_row(b"keep")
+    assert page.update_row(0, b"new1") == 0        # 同长度 → 槽号不变
+    assert list(page.rows()) == [(0, b"new1"), (1, b"keep")]
+
+
+def test_update_row_length_change_moves_slot():
+    page = Page(page_id=12)
+    page.insert_row(b"a")
+    new_slot = page.update_row(0, b"bb")           # 长度变了 → 删除+插入
+    assert new_slot == 1
+    assert list(page.rows()) == [(1, b"bb")]
+
+
+def test_update_row_on_full_page_same_length_still_works():
+    page = Page(page_id=13)
+    while page.insert_row(b"abc") is not None:
+        pass
+    assert page.update_row(0, b"xyz") == 0         # 页满也能原地改
+    assert page.get_row(0) == b"xyz"

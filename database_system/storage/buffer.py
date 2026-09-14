@@ -77,6 +77,7 @@ class BufferPool:
               self._fm.write_page(pid, fr["page"])
               fr["dirty"] = False
               self._flushes += 1
+              logger.info("flush page %s", pid)
 
       def flush_all(self):
           for pid, fr in list(self._frames.items()):
@@ -84,6 +85,7 @@ class BufferPool:
                   self._fm.write_page(pid, fr["page"])
                   fr["dirty"] = False
                   self._flushes += 1
+                  logger.info("flush_all page %s", pid)
 
       def stats(self):
           return {"hits": self._hits, "misses": self._misses,"evictions": self._evictions, "flushes": self._flushes,"policy": self.policy}

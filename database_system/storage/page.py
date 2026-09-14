@@ -2,6 +2,16 @@ import struct
 
 from database_system.utils.constants import PAGE_SIZE
 
+# 契约要求存储错误统一抛 utils.errors.StorageError；B 未提供时先用本地兜底
+try:
+    from database_system.utils.errors import StorageError
+except ImportError:
+    class StorageError(Exception):
+        def __init__(self, message):
+            self.type = "StorageError"
+            self.message = message
+            super().__init__(message)
+
 HEADER_SIZE = 32   # 页头固定 32 字节
 SLOT_SIZE = 4      # 一个槽 = offset(u16) + length(u16)
 
@@ -38,6 +48,17 @@ class Page:
 
       def delete_row(self, slot):
           self._slots[slot][1] = 0  # 长度置 0 = 已删，先不搬数据
+
+      def update_row(self, slot, row):
+          # 就地改写一行：长度相同则原地覆盖（不额外占空间）；
+          # 长度变化则退化为“删除旧行 + 插入新行”，返回新的槽号。
+          # 返回 None 表示因空间不足而失败（长度变化时可能出现）。
+          offset, length = self._slots[slot]
+          if length != 0 and len(row) == length:
+              self._data[offset:offset + length] = row
+              return slot
+          self.delete_row(slot)
+          return self.insert_row(row)
 
       def rows(self):
           for i, (offset, length) in enumerate(self._slots):

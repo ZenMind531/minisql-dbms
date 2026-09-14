@@ -59,4 +59,16 @@ def test_dirty_page_flushed_on_eviction(tmp_path):
       pool.unpin_page(2)
       assert pool.stats()["evictions"] == 1 and pool.stats()["flushes"] == 1
       assert list(fm.read_page(1).rows()) == [(0, b"AAA")]
+
+
+def test_flush_all_writes_dirty_pages(tmp_path):
+      fm = _fm(str(tmp_path / "e.dat"), 2)
+      pool = BufferPool(fm, capacity=4, policy="LRU")
+      p1 = pool.get_page(1)
+      p1.insert_row(b"XYZ")
+      pool.unpin_page(1, dirty=True)
+      assert list(fm.read_page(1).rows()) == []      # 还没 flush，磁盘上没有
+      pool.flush_all()                               # CLI 退出前调用
+      assert list(fm.read_page(1).rows()) == [(0, b"XYZ")]
+      assert pool.stats()["flushes"] == 1
       
