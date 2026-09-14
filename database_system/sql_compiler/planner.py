@@ -83,6 +83,7 @@ class CreateTable:
 @dataclass(slots=True)
 class Insert:
     table: str
+    columns: list[str] | None  # None = 按建表顺序；否则按指定列顺序
     rows: list[Any]
 
 
@@ -104,7 +105,7 @@ class Planner:
             return DropTable(stmt.table)
         if isinstance(stmt, InsertStmt):
             # One INSERT statement represents one row in the grammar.
-            return Insert(stmt.table, [list(stmt.values)])
+            return Insert(stmt.table, stmt.columns, [list(stmt.values)])
         if isinstance(stmt, UpdateStmt):
             child: PlanNode | None = None
             if stmt.where is not None:
@@ -235,8 +236,12 @@ def plan_to_json(plan: PlanNode) -> dict[str, Any]:
         return {"type": "CreateTable", "table": plan.table,
                 "schema": _schema_json(plan.schema)}
     if isinstance(plan, Insert):
-        return {"type": "Insert", "table": plan.table,
-                "rows": _value_json(plan.rows)}
+        return {
+            "type": "Insert",
+            "table": plan.table,
+            "columns": plan.columns,
+            "rows": _value_json(plan.rows)
+        }
     raise TypeError(f"unsupported plan type: {type(plan).__name__}")
 
 
@@ -298,7 +303,8 @@ def _node_label(plan: PlanNode) -> str:
         )
         return f"CreateTable({plan.table}, schema=[{schema}])"
     if isinstance(plan, Insert):
-        return f"Insert({plan.table}, rows={len(plan.rows)})"
+        cols_text = "*" if plan.columns is None else ", ".join(plan.columns)
+        return f"Insert({plan.table}, columns=[{cols_text}], rows={len(plan.rows)})"
     raise TypeError(f"unsupported plan type: {type(plan).__name__}")
 
 
