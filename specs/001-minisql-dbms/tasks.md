@@ -9,8 +9,8 @@ description: "Task list for MiniSQL 教学数据库系统 (4-person team)"
 **Tests**: 包含（宪章 III「测试先行」为 NON-NEGOTIABLE）
 **团队**: 4 人，负责人标注 (A)(B)(C)(D)，见文末「四人分工总览」
 
-> 状态同步于 2026-09-10。勾选表示仓库中已有对应实现与测试；T028、T034
-> 等未勾选项仍是正式交付缺口。
+> 状态同步于 2026-09-14。勾选表示仓库中已有对应实现与测试；未勾选项
+> 即正式交付缺口。
 
 ## Format: `[ID] [P?] [Story] (负责人) 描述（含文件路径）`
 
@@ -114,9 +114,11 @@ description: "Task list for MiniSQL 教学数据库系统 (4-person team)"
 - [x] T035 [P] 完善 `README.md`（构建/运行/演示命令）与 `docs/design.md`（AST/Catalog/Plan 结构说明）（A）
 - [ ] T036 [P] 整理测试报告：测试用例清单、运行结果截图/日志、失败案例分析（C）
 - [ ] T037 实习报告：关键设计决策、问题定位过程、AI 辅助使用说明、四人贡献说明（D 汇总，全员供稿）
-- [ ] T038 [P] 扩展项：ORDER BY 已端到端完成；DROP TABLE、UPDATE、LIMIT 的
-  Lexer/AST/Parser 前端由 A 完成，Semantic/Plan/Executor 待 B/D 接入并经全组
-  契约评审；固定种子 Fuzz、Plan 可视化仍需单独验收（认领制）
+- [ ] T038 [P] 扩展项：ORDER BY、DROP TABLE、LIMIT 已端到端完成（后两者的
+  Executor 由 D 接入，测试见 `tests/test_engine.py` 的 DROP TABLE / LIMIT 两节）；
+  UPDATE 的 Lexer/AST/Parser 与 Semantic/Plan 均已就位，Executor 待接入——卡在
+  `StorageEngine` 目前没有"改行"原语（只有 insert_row / scan / delete_where），
+  需 C 补 `update_where` 或另议方案；固定种子 Fuzz、Plan 可视化仍需单独验收（认领制）
 - [ ] T039 最终验收彩排：按 quickstart.md 全流程演示一遍，每人随机抽讲一个函数（全员）
 
 ---
