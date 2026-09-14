@@ -609,6 +609,70 @@ def test_recreating_a_dropped_table_starts_empty(tmp_path: Path) -> None:
         db.close()
 
 
+# ---------- LIMIT ----------
+# LIMIT 落在计划树最外层（Limit → Project → Sort → Filter → SeqScan），
+# 也就是最后才截断——这正是"先排序、再取前 N"能对的原因。
+
+
+def _five_rows(tmp_path: Path) -> MiniDB:
+    """建一张 t(id, name)，塞进 1..5 五行，返回打开的库。"""
+    db = MiniDB(str(tmp_path))
+    db.execute("CREATE TABLE t(id INT, name VARCHAR(8));")
+    for number in range(1, 6):
+        db.execute(f"INSERT INTO t VALUES ({number}, 'n{number}');")
+    return db
+
+
+def test_limit_takes_the_first_n_rows(tmp_path: Path) -> None:
+    db = _five_rows(tmp_path)
+    try:
+        assert db.execute("SELECT * FROM t LIMIT 2;") == "(1, 'n1')\n(2, 'n2')"
+    finally:
+        db.close()
+
+
+def test_limit_zero_returns_nothing(tmp_path: Path) -> None:
+    """LIMIT 0 是"一行都不要"，不是"不限"——最容易写反的那个边界。"""
+    db = _five_rows(tmp_path)
+    try:
+        assert db.execute("SELECT * FROM t LIMIT 0;") == ""
+    finally:
+        db.close()
+
+
+def test_limit_beyond_the_table_returns_everything(tmp_path: Path) -> None:
+    """要 100 行但只有 5 行：给 5 行就是了，不该报错。"""
+    db = _five_rows(tmp_path)
+    try:
+        assert len(db.execute("SELECT * FROM t LIMIT 100;").splitlines()) == 5
+    finally:
+        db.close()
+
+
+def test_limit_applies_after_order_by(tmp_path: Path) -> None:
+    """先排序再截断。
+
+    截断要是错发生在 Sort 之前，这里会拿到 1,2 而不是 5,4——顺序反了，
+    行数却一样，光看行数发现不了。
+    """
+    db = _five_rows(tmp_path)
+    try:
+        assert db.execute(
+            "SELECT * FROM t ORDER BY id DESC LIMIT 2;"
+        ) == "(5, 'n5')\n(4, 'n4')"
+    finally:
+        db.close()
+
+
+def test_limit_applies_after_where(tmp_path: Path) -> None:
+    """先过滤再截断：id > 3 只剩 4、5 两行，LIMIT 1 该拿到 4。"""
+    db = _five_rows(tmp_path)
+    try:
+        assert db.execute("SELECT * FROM t WHERE id > 3 LIMIT 1;") == "(4, 'n4')"
+    finally:
+        db.close()
+
+
 # ---------- INSERT 列名落位 ----------
 
 

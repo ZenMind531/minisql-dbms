@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import operator
+from itertools import islice
 from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeAlias
 
 from database_system.engine.storage_engine import StorageEngine
@@ -23,7 +24,7 @@ from database_system.sql_compiler.ast_nodes import (
 )
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import (
-    CreateTable, Delete, DropTable, Filter, Insert, PlanNode, Project,
+    CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode, Project,
     SeqScan, ShowDatabases, ShowTables, Sort,
 )
 from database_system.utils.errors import ExecError
@@ -145,7 +146,7 @@ class Executor:
             return [(self.engine.data_dir.name or str(self.engine.data_dir),)]
         if isinstance(plan, ShowTables):
             return [(name,) for name in self.catalog.table_names(include_system=False)]
-        if isinstance(plan, (SeqScan, Filter, Project, Sort)):
+        if isinstance(plan, (SeqScan, Filter, Project, Sort, Limit)):
             return self._select(plan)
         # 前端解析得出来、执行器还没实现的节点（Update 等）。
         # 不能默认丢给 _select：那里要顺着 child 找 SeqScan，而这些节点
@@ -224,6 +225,9 @@ class Executor:
                     reverse=item.descending,
                 )
             yield from rows
+        elif isinstance(plan, Limit):
+            # islice 是惰性的：取够 count 行就不再往下要，不会白扫全表
+            yield from islice(self._run(plan.child, index), plan.count)
         else:
             raise ExecError(f"不支持的查询计划: {type(plan).__name__}")
 
