@@ -68,7 +68,9 @@ SQL → Lexer → Token → Parser → AST
 
 ### 存储与引擎
 
-- Page、FileManager、BufferPool 和跨进程持久化测试已完成。
+- Page、FileManager、BufferPool 和跨进程持久化测试已完成（`tests/test_storage.py` 9 项、`tests/test_buffer.py` 5 项、`tests/test_storage_persist.py` 1 项）。
+- 新增 `Page.update_row(slot, row)` 支持 UPDATE 写回：长度相同则原地覆盖（不额外占页空间），长度变化则退化为删除+插入，空间不足返回 `None`。
+- 存储部分测试报告见 `docs/T036-storage-test-report.md`；DROP TABLE / UPDATE 的存储层评审与给 D 的操作顺序、失败补偿建议见 `docs/C-review-drop-update.md`。
 - StorageEngine、Executor、MiniDB 与 CLI 已实现，支持交互、脚本、数据目录和
   编译器演示模式。
 - CatalogManager 已实现 `__catalog__` bootstrap、模式恢复以及 CREATE 失败补偿；
@@ -81,7 +83,8 @@ SQL → Lexer → Token → Parser → AST
 - `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql` 尚未创建，正式 T028/T034
   端到端验收仍未完成。
 - SC-006 要求的“插入至少 100 行后删除并重启验证”尚未形成版本库测试。
-- T036 测试报告、T037 实习报告和 T039 最终验收彩排尚未完成。
+- T036 整组测试报告、T037 实习报告和 T039 最终验收彩排尚未完成；存储模块的测试报告（`docs/T036-storage-test-report.md`）已产出。
+- 契约冲突待评审：契约写“存储错误抛 `StorageError`”，但 `FileManager.read_page` 的越界/坏 magic 需抛 `ValueError` 才能被引擎正确包装（`tests/test_engine.py` 依赖此行为）。详见 `docs/C-review-drop-update.md` 第 4 节。
 - SHOW / ORDER BY 是已实现扩展，但冻结的三份契约尚未同步这些新增节点；若要
   把扩展接口正式冻结，需要 B、C、D 与全组评审，成员 A 不单独改契约。
 - DROP TABLE / UPDATE / LIMIT 的语义分析和计划构建已完成，尚待 D 完成执行器集成。
@@ -104,6 +107,11 @@ SQL → Lexer → Token → Parser → AST
   LRU/FIFO，并在淘汰或关闭前写回脏页。
 - CREATE 顺序为“创建数据文件 → 持久化目录行 → 更新内存 Catalog”；失败时
   回滚本次创建的文件和目录记录。
+- UPDATE 写回优先使用 `Page.update_row`：同长度原地覆盖；`delete_row` 不回收
+  空间，反复“删除+插入”会使页提前判满。
+- DROP TABLE 删除 `.dat` 前必须 `flush_all → close`（Windows 下文件被打开则
+  无法删除），顺序为“存储层清理 → 删元数据 → 删文件”；失败时最多留下无害的
+  孤儿文件，不会出现“元数据在、文件没了”。
 
 ## 6. 验证状态
 
@@ -113,16 +121,17 @@ SQL → Lexer → Token → Parser → AST
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-结果：`236 passed` (含新增 20 个 DROP/UPDATE/LIMIT 测试)。该结果覆盖当前已有测试，
-但不代表缺失的 T028/T034 和 SC-006 已完成。
+结果：`216 passed, 171 subtests passed`。其中成员 A 直接相关的 AST、Lexer、
+Parser、SHOW/ORDER BY 精简回归为 `47 passed, 24 subtests passed`。该结果覆盖当前已有测试，但不代表缺失的
+T028/T034 和 SC-006 已完成。
 
 ## 7. 下一步
 
 1. 先新增 `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql`，覆盖至少 100 行、
    条件查询、删除、关闭和重启恢复。
 2. 用 quickstart 完成三阶段验收，并整理 T036 测试报告。
-3. 由 D 接入 DROP TABLE、UPDATE、LIMIT 的执行器实现，再由全组统一评审 SHOW、
-   ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
+3. 由 B/D 接入 DROP TABLE、UPDATE、LIMIT 的语义、计划与执行，再由全组统一
+   评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
 4. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
 
 ## 8. 维护规则
