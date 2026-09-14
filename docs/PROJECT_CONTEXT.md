@@ -1,6 +1,6 @@
 # MiniSQL 项目上下文
 
-> 最后更新：2026-09-10
+> 最后更新：2026-09-14
 > 本文只记录当前事实。历史过程由 Git 追踪，不在此追加时间线。
 
 ## 1. 项目范围
@@ -14,7 +14,8 @@ MiniSQL 是使用 Python 3.11 标准库实现的教学型关系数据库，面�
 - 4KB slotted page、LRU/FIFO 缓冲池和磁盘持久化；
 - REPL、SQL 文件执行和 `--compile-only` 编译器演示。
 
-`UPDATE`、`JOIN`、`LIMIT`、`GROUP BY`、事务、并发控制和索引不在当前范围。
+`DROP TABLE`、`UPDATE`、`LIMIT` 当前只完成编译器前端，尚不能端到端执行。
+`JOIN`、`GROUP BY`、事务、并发控制和索引不在当前范围。
 
 ## 2. 权威文档与优先级
 
@@ -50,6 +51,9 @@ SQL → Lexer → Token → Parser → AST
 - AST、语义分析、Logical Plan、树形/JSON 输出和规则优化器均已接通。
 - SHOW 和多列 ORDER BY 已贯通 Lexer、AST、Parser、Semantic、Planner、
   Optimizer 与 Executor；Sort 位于 Project 之前，可按未投影列排序。
+- DROP TABLE、UPDATE、LIMIT 已完成成员 A 范围的关键字、AST、Parser 与前端
+  测试。新增 `DropTableStmt`、`Assignment`、`UpdateStmt`、`LimitClause`，其中
+  UPDATE 支持多列赋值和可选 WHERE，LIMIT 接受非负整数并位于 ORDER BY 后。
 - `tests/sql/compiler_cases.json` 含 34 个正常、词法、语法和语义案例。
 
 ### 存储与引擎
@@ -70,6 +74,10 @@ SQL → Lexer → Token → Parser → AST
 - T036 测试报告、T037 实习报告和 T039 最终验收彩排尚未完成。
 - SHOW / ORDER BY 是已实现扩展，但冻结的三份契约尚未同步这些新增节点；若要
   把扩展接口正式冻结，需要 B、C、D 与全组评审，成员 A 不单独改契约。
+- DROP TABLE / UPDATE / LIMIT 尚待 B 完成语义与计划、D 完成执行与目录/存储
+  集成；新增 AST 同样必须在端到端接入前由 B、D 与全组评审冻结。
+- 当前旧 Planner 尚不读取 `SelectStmt.limit`，所以 LIMIT 虽能解析，但通过
+  MiniDB 执行时可能被静默忽略；B 接入前不得将其视为有效的限行功能。
 
 ## 5. 关键设计决定
 
@@ -88,13 +96,14 @@ SQL → Lexer → Token → Parser → AST
 
 ## 6. 验证状态
 
-2026-09-10 使用仓库 `.venv` 运行：
+2026-09-14 使用仓库 `.venv` 运行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-结果：`211 passed, 162 subtests passed`。该结果覆盖当前已有测试，但不代表缺失的
+结果：`216 passed, 171 subtests passed`。其中成员 A 直接相关的 AST、Lexer、
+Parser、SHOW/ORDER BY 精简回归为 `47 passed, 24 subtests passed`。该结果覆盖当前已有测试，但不代表缺失的
 T028/T034 和 SC-006 已完成。
 
 ## 7. 下一步
@@ -102,8 +111,9 @@ T028/T034 和 SC-006 已完成。
 1. 先新增 `tests/test_e2e.py` 与 `tests/sql/demo_e2e.sql`，覆盖至少 100 行、
    条件查询、删除、关闭和重启恢复。
 2. 用 quickstart 完成三阶段验收，并整理 T036 测试报告。
-3. 由全组评审 SHOW、ORDER BY 对 AST/Plan 契约的影响，再决定是否更新冻结契约。
-4. 完成报告与最终彩排；必做项验收前不继续扩展 SQL 范围。
+3. 由 B/D 接入 DROP TABLE、UPDATE、LIMIT 的语义、计划与执行，再由全组统一
+   评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
+4. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
 
 ## 8. 维护规则
 

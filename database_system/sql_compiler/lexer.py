@@ -29,6 +29,10 @@ KEYWORDS = frozenset(
         "BY",
         "ASC",
         "DESC",
+        "DROP",
+        "UPDATE",
+        "SET",
+        "LIMIT",
     }
 )
 
