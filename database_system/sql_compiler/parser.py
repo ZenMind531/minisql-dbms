@@ -5,22 +5,29 @@ from __future__ import annotations
 from collections.abc import Collection
 
 from database_system.sql_compiler.ast_nodes import (
+    Assignment,
     BinaryExpr,
     BinaryOperator,
     ColumnDef,
     CreateTableStmt,
     DeleteStmt,
+    DropTableStmt,
     Expr,
     IdentifierExpr,
     InsertStmt,
     LiteralExpr,
     LiteralKind,
+    LimitClause,
+    OrderByItem,
     SelectStmt,
+    ShowDatabasesStmt,
+    ShowTablesStmt,
     Stmt,
     TypeKind,
     TypeSpec,
     UnaryExpr,
     UnaryOperator,
+    UpdateStmt,
 )
 from database_system.sql_compiler.lexer import Token, TokenType
 from database_system.utils.errors import ParseError
@@ -74,13 +81,22 @@ class Parser:
         token = self._current()
         if self._is_keyword("CREATE"):
             return self._parse_create_table()
+        if self._is_keyword("DROP"):
+            return self._parse_drop_table()
         if self._is_keyword("INSERT"):
             return self._parse_insert()
+        if self._is_keyword("UPDATE"):
+            return self._parse_update()
         if self._is_keyword("SELECT"):
             return self._parse_select()
         if self._is_keyword("DELETE"):
             return self._parse_delete()
-        raise self._error(token, {"statement (CREATE, INSERT, SELECT, DELETE)"})
+        if self._is_keyword("SHOW"):
+            return self._parse_show()
+        raise self._error(
+            token,
+            {"statement (CREATE, DROP, INSERT, UPDATE, SELECT, DELETE, SHOW)"},
+        )
 
     def _parse_create_table(self) -> CreateTableStmt:
         start = self._consume_keyword("CREATE")
@@ -125,6 +141,16 @@ class Parser:
         self._consume_lexeme(")", {"VARCHAR(n)"})
         return TypeSpec(TypeKind.VARCHAR, length)
 
+    def _parse_drop_table(self) -> DropTableStmt:
+        start = self._consume_keyword("DROP")
+        self._consume_keyword("TABLE")
+        table = self._consume_identifier()
+        return DropTableStmt(
+            line=start.line,
+            column=start.column,
+            table=table.lexeme,
+        )
+
     def _parse_insert(self) -> InsertStmt:
         start = self._consume_keyword("INSERT")
         self._consume_keyword("INTO")
@@ -145,6 +171,33 @@ class Parser:
             values=values,
         )
 
+    def _parse_update(self) -> UpdateStmt:
+        start = self._consume_keyword("UPDATE")
+        table = self._consume_identifier()
+        self._consume_keyword("SET")
+        assignments = [self._parse_assignment()]
+        while self._match_lexeme(","):
+            assignments.append(self._parse_assignment())
+        where = self._parse_expression() if self._match_keyword("WHERE") else None
+        return UpdateStmt(
+            line=start.line,
+            column=start.column,
+            table=table.lexeme,
+            assignments=assignments,
+            where=where,
+        )
+
+    def _parse_assignment(self) -> Assignment:
+        column = self._consume_identifier()
+        self._consume_lexeme("=", {"="})
+        value = self._parse_expression()
+        return Assignment(
+            line=column.line,
+            column=column.column,
+            column_name=column.lexeme,
+            value=value,
+        )
+
     def _parse_select(self) -> SelectStmt:
         start = self._consume_keyword("SELECT")
         if self._match_lexeme("*"):
@@ -154,13 +207,56 @@ class Parser:
         self._consume_keyword("FROM")
         table = self._consume_identifier()
         where = self._parse_expression() if self._match_keyword("WHERE") else None
+        order_by = self._parse_order_by() if self._match_keyword("ORDER") else []
+        limit = self._parse_limit() if self._is_keyword("LIMIT") else None
         return SelectStmt(
             line=start.line,
             column=start.column,
             columns=columns,
             table=table.lexeme,
             where=where,
+            order_by=order_by,
+            limit=limit,
         )
+
+    def _parse_order_by(self) -> list[OrderByItem]:
+        self._consume_keyword("BY")
+        items = [self._parse_order_item()]
+        while self._match_lexeme(","):
+            items.append(self._parse_order_item())
+        return items
+
+    def _parse_order_item(self) -> OrderByItem:
+        column = self._consume_identifier()
+        descending = self._match_keyword("DESC")
+        if not descending:
+            self._match_keyword("ASC")
+        return OrderByItem(
+            line=column.line,
+            column=column.column,
+            column_name=column.lexeme,
+            descending=descending,
+        )
+
+    def _parse_limit(self) -> LimitClause:
+        start = self._consume_keyword("LIMIT")
+        count = self._current()
+        if not self._is_integer_literal(count):
+            raise self._error(count, {"non-negative integer LIMIT"})
+        self._advance()
+        return LimitClause(
+            line=start.line,
+            column=start.column,
+            count=int(count.lexeme),
+        )
+
+    def _parse_show(self) -> Stmt:
+        start = self._consume_keyword("SHOW")
+        if self._match_keyword("DATABASES"):
+            return ShowDatabasesStmt(line=start.line, column=start.column)
+        if self._match_keyword("TABLES"):
+            return ShowTablesStmt(line=start.line, column=start.column)
+        raise self._error(self._current(), {"DATABASES", "TABLES"})
 
     def _parse_delete(self) -> DeleteStmt:
         start = self._consume_keyword("DELETE")

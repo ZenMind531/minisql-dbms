@@ -1,5 +1,6 @@
 import unittest
 
+from database_system.sql_compiler import ast_nodes
 from database_system.sql_compiler.ast_nodes import (
     BinaryExpr,
     BinaryOperator,
@@ -19,6 +20,69 @@ from database_system.sql_compiler.ast_nodes import (
 
 
 class ASTNodeTests(unittest.TestCase):
+    def test_drop_update_and_limit_nodes_preserve_frontend_structure(self) -> None:
+        self.assertTrue(hasattr(ast_nodes, "Assignment"))
+        self.assertTrue(hasattr(ast_nodes, "DropTableStmt"))
+        self.assertTrue(hasattr(ast_nodes, "UpdateStmt"))
+        self.assertTrue(hasattr(ast_nodes, "LimitClause"))
+        assignment_type = ast_nodes.Assignment
+        drop_type = ast_nodes.DropTableStmt
+        update_type = ast_nodes.UpdateStmt
+        limit_type = ast_nodes.LimitClause
+
+        one = LiteralExpr(
+            line=2,
+            column=26,
+            value=1,
+            literal_kind=LiteralKind.INTEGER,
+        )
+        assignment = assignment_type(
+            line=2,
+            column=20,
+            column_name="age",
+            value=one,
+        )
+        drop = drop_type(line=1, column=1, table="student")
+        update = update_type(
+            line=2,
+            column=1,
+            table="student",
+            assignments=[assignment],
+            where=None,
+        )
+        limit = limit_type(line=3, column=23, count=0)
+        select = SelectStmt(
+            line=3,
+            column=1,
+            columns=None,
+            table="student",
+            where=None,
+            limit=limit,
+        )
+
+        self.assertEqual(drop.table, "student")
+        self.assertEqual(update.assignments, [assignment])
+        self.assertIs(assignment.value, one)
+        self.assertIs(select.limit, limit)
+        self.assertEqual((limit.line, limit.column, limit.count), (3, 23, 0))
+
+    def test_update_requires_assignment_and_limit_rejects_negative_count(
+        self,
+    ) -> None:
+        update_type = ast_nodes.UpdateStmt
+        limit_type = ast_nodes.LimitClause
+
+        with self.assertRaisesRegex(ValueError, "at least one assignment"):
+            update_type(
+                line=1,
+                column=1,
+                table="student",
+                assignments=[],
+                where=None,
+            )
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            limit_type(line=1, column=23, count=-1)
+
     def test_column_definition_only_accepts_int_or_bounded_varchar(self) -> None:
         int_column = ColumnDef(
         line=1,

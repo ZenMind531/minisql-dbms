@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypeAlias
 
@@ -150,10 +150,34 @@ class InsertStmt(ASTNode):
 
 
 @dataclass(slots=True, kw_only=True)
+class Assignment(ASTNode):
+    column_name: str
+    value: Expr
+
+
+@dataclass(slots=True, kw_only=True)
+class OrderByItem(ASTNode):
+    column_name: str
+    descending: bool = False
+
+
+@dataclass(slots=True, kw_only=True)
+class LimitClause(ASTNode):
+    count: int
+
+    def __post_init__(self) -> None:
+        ASTNode.__post_init__(self)
+        if self.count < 0:
+            raise ValueError("LIMIT count must be non-negative")
+
+
+@dataclass(slots=True, kw_only=True)
 class SelectStmt(ASTNode):
     columns: list[str] | None
     table: str
     where: Expr | None
+    order_by: list[OrderByItem] = field(default_factory=list)
+    limit: LimitClause | None = None
 
     def __post_init__(self) -> None:
         ASTNode.__post_init__(self)
@@ -167,25 +191,63 @@ class DeleteStmt(ASTNode):
     where: Expr | None
 
 
-Stmt: TypeAlias = CreateTableStmt | InsertStmt | SelectStmt | DeleteStmt
+@dataclass(slots=True, kw_only=True)
+class DropTableStmt(ASTNode):
+    table: str
+
+
+@dataclass(slots=True, kw_only=True)
+class UpdateStmt(ASTNode):
+    table: str
+    assignments: list[Assignment]
+    where: Expr | None
+
+    def __post_init__(self) -> None:
+        ASTNode.__post_init__(self)
+        if not self.assignments:
+            raise ValueError("UPDATE requires at least one assignment")
+
+
+@dataclass(slots=True, kw_only=True)
+class ShowDatabasesStmt(ASTNode):
+    pass
+
+
+@dataclass(slots=True, kw_only=True)
+class ShowTablesStmt(ASTNode):
+    pass
+
+
+Stmt: TypeAlias = (
+    CreateTableStmt | DropTableStmt | InsertStmt | SelectStmt | UpdateStmt
+    | DeleteStmt
+    | ShowDatabasesStmt | ShowTablesStmt
+)
 
 
 __all__ = [
     "ASTNode",
+    "Assignment",
     "BinaryExpr",
     "BinaryOperator",
     "ColumnDef",
     "CreateTableStmt",
     "DeleteStmt",
+    "DropTableStmt",
     "Expr",
     "IdentifierExpr",
     "InsertStmt",
+    "LimitClause",
     "LiteralExpr",
     "LiteralKind",
+    "OrderByItem",
     "SelectStmt",
+    "ShowDatabasesStmt",
+    "ShowTablesStmt",
     "Stmt",
     "TypeKind",
     "TypeSpec",
     "UnaryExpr",
     "UnaryOperator",
+    "UpdateStmt",
 ]

@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Any, Callable, Iterator, TypeAlias
+from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeAlias
 
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import (
@@ -24,8 +24,12 @@ from database_system.sql_compiler.ast_nodes import (
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import (
     CreateTable, Delete, Filter, Insert, PlanNode, Project, SeqScan,
+    ShowDatabases, ShowTables, Sort,
 )
 from database_system.utils.errors import ExecError
+
+if TYPE_CHECKING:
+    from database_system.engine.catalog_manager import CatalogManager
 
 Result: TypeAlias = str | list[tuple]
 
@@ -103,9 +107,15 @@ def _base_table(plan: PlanNode) -> str:
 
 
 class Executor:
-    def __init__(self, engine: StorageEngine, catalog: Catalog):
+    def __init__(
+        self,
+        engine: StorageEngine,
+        catalog: Catalog,
+        catalog_manager: CatalogManager | None = None,
+    ):
         self.engine = engine
         self.catalog = catalog
+        self.catalog_manager = catalog_manager
 
     # ---------- 入口 ----------
     def execute(self, plan: PlanNode) -> Result:
@@ -115,14 +125,22 @@ class Executor:
             return self._insert(plan)
         if isinstance(plan, Delete):
             return self._delete(plan)
+        if isinstance(plan, ShowDatabases):
+            return [(self.engine.data_dir.name or str(self.engine.data_dir),)]
+        if isinstance(plan, ShowTables):
+            return [(name,) for name in self.catalog.table_names(include_system=False)]
         return self._select(plan)
 
     # ---------- 四种计划 ----------
     def _create_table(self, plan: CreateTable) -> str:
         # 先借 Catalog 的规则做纯校验：不过就不碰磁盘，不会留下半个表
         Catalog().create_table(plan.table, plan.schema)
-        self.engine.create_table(TableSchema(name=plan.table, columns=list(plan.schema)))
-        self.catalog.create_table(plan.table, plan.schema)
+        schema = TableSchema(name=plan.table, columns=list(plan.schema))
+        if self.catalog_manager is None:
+            self.engine.create_table(schema)
+            self.catalog.create_table(plan.table, plan.schema)
+        else:
+            self.catalog_manager.create_table(schema, self.catalog)
         return "OK"
 
     def _insert(self, plan: Insert) -> str:
@@ -161,6 +179,14 @@ class Executor:
                 wanted = [index[name] for name in plan.columns]
                 for row in self._run(plan.child, index):
                     yield tuple(row[position] for position in wanted)
+        elif isinstance(plan, Sort):
+            rows = list(self._run(plan.child, index))
+            for item in reversed(plan.items):
+                rows.sort(
+                    key=lambda row, name=item.column_name: row[index[name]],
+                    reverse=item.descending,
+                )
+            yield from rows
         else:
             raise ExecError(f"不支持的查询计划: {type(plan).__name__}")
 

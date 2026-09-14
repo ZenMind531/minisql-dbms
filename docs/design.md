@@ -22,10 +22,15 @@ Lexer 不判断语句结构，Parser 不查询 Catalog，也不进行类型检�
 
 ## AST
 
-语句节点为 `CreateTableStmt`、`InsertStmt`、`SelectStmt`、`DeleteStmt`。表达式
-节点为 `IdentifierExpr`、`LiteralExpr`、`UnaryExpr`、`BinaryExpr`。
+语句节点为 `CreateTableStmt`、`DropTableStmt`、`InsertStmt`、`UpdateStmt`、
+`SelectStmt`、`DeleteStmt`、`ShowDatabasesStmt`、`ShowTablesStmt`。辅助节点包含
+`Assignment`、`OrderByItem`、`LimitClause`；表达式节点为 `IdentifierExpr`、
+`LiteralExpr`、`UnaryExpr`、`BinaryExpr`。
 
 - `SelectStmt.columns=None` 表示 `SELECT *`。
+- `SelectStmt.order_by` 保存有序的 `OrderByItem` 列表；每项记录列名及是否降序。
+- `SelectStmt.limit` 保存可选的非负行数限制及 LIMIT 关键字位置。
+- `UpdateStmt.assignments` 保存至少一个有序赋值项，右侧复用现有表达式 AST。
 - `InsertStmt.columns=None` 表示省略目标列列表。
 - 字符串 AST 值去掉外围引号，并将 `''` 解码为 `'`。
 - 正负号使用 UnaryExpr 表示，不属于数字 Token。
@@ -52,6 +57,38 @@ expression
 括号重新进入 `expression`，覆盖默认优先级。嵌套深度设有安全上限，过深输入
 报告 `ParseError`，不会泄漏 Python `RecursionError`。
 
+## SHOW 与排序计划
+
+`SHOW DATABASES` 显示当前 `--data` 目录名称；`SHOW TABLES` 显示按名称升序排列
+的用户表，并隐藏内部 `__catalog__` 表。SHOW 节点保持独立，后续增加多数据库
+切换时可以扩展目录提供者，而无需改变现有语法。
+
+SELECT 的 ORDER BY 支持多列，每列可独立使用 `ASC`、`DESC`，省略方向时默认
+为 `ASC`。排序计划位于投影之前：
+
+```text
+Project → Sort → Filter（可选）→ SeqScan
+```
+
+因此排序列不必出现在 SELECT 列表中。执行器从最后一个排序键向前进行稳定排序，
+从而保持 SQL 中从左到右的排序优先级。
+
+## DROP、UPDATE 与 LIMIT 前端扩展
+
+成员 A 已完成三项扩展的关键字、AST 和递归下降解析：
+
+```sql
+DROP TABLE student;
+UPDATE student SET name = 'Alice', age = age + 1 WHERE id = 1;
+SELECT * FROM student ORDER BY age DESC LIMIT 10;
+```
+
+DROP 只接受单个表名；UPDATE 支持多个赋值项和可选 WHERE；LIMIT 位于可选
+ORDER BY 之后且只接受非负整数。当前 Semantic、Planner 和 Executor 尚未识别
+这些新增结构，因此它们是稳定的前端交接接口，不是可端到端执行的数据库功能。
+其中旧 Planner 会忽略 `SelectStmt.limit`，B 接入前禁止把此时的查询结果视为
+LIMIT 已生效。正式冻结前仍需成员 B、D 与全组评审。
+
 ## 错误处理
 
 Lexer 对非法字符、非法数字、未闭合字符串和块注释抛 `LexError`。Parser 对
@@ -62,6 +99,12 @@ Token 的行列号，ParseError 消息同时包含 actual Token 和 expected 集
 
 ```sql
 SELECT name FROM student WHERE age > 18 AND id != 3;
+SELECT name FROM student ORDER BY age DESC, name ASC;
+SHOW DATABASES;
+SHOW TABLES;
+DROP TABLE student;
+UPDATE student SET age = age + 1 WHERE id = 1;
+SELECT * FROM student LIMIT 10;
 ```
 
 关键表达式 AST：

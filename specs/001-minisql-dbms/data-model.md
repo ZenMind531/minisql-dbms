@@ -12,8 +12,8 @@
 ### AST（docs/design.md 详述）
 - 语句节点：`CreateTableStmt(table, columns: [ColumnDef])` /
   `InsertStmt(table, columns: [str] | None, values)` /
-  `SelectStmt(columns: [str] | None, table, where)` /
-  `DeleteStmt(table, where)`
+  `SelectStmt(columns: [str] | None, table, where, order_by)` /
+  `DeleteStmt(table, where)` / `ShowDatabasesStmt()` / `ShowTablesStmt()`
 - 表达式节点：`BinaryExpr(op, left, right)` / `UnaryExpr(NOT, operand)` /
   `IdentifierExpr(name)` / `LiteralExpr(value, type)`
 - 所有节点带 `line, column`；复合表达式记录其整个源码片段的起始位置，
@@ -21,6 +21,8 @@
   `resolved_type`。
 - `InsertStmt.columns=None` 表示省略目标列列表；`SelectStmt.columns=None`
   表示 `SELECT *`，非空列表表示显式列名。
+- `SelectStmt.order_by` 是 `OrderByItem(column_name, descending)` 列表；空列表
+  表示不排序。
 - 字符串 `LiteralExpr.value` 不含外围引号，源码中的 `''` 解码为一个 `'`。
 - `LiteralExpr` 的 value 必须与 INTEGER/FLOAT/STRING 字面量种类匹配；FLOAT
   可暂存在 AST，但当前语义阶段统一拒绝。
@@ -55,7 +57,8 @@
 
 ### Logical Plan 节点
 `CreateTable(table, schema)` / `Insert(table, rows)` / `Delete(table, child)` /
-`SeqScan(table)` / `Filter(predicate)` / `Project(columns)`
+`SeqScan(table)` / `Filter(predicate)` / `Sort(items, child)` /
+`Project(columns, child)` / `ShowDatabases` / `ShowTables`
 - 仅含执行所需信息；可序列化为 JSON。
 
 ### Row（执行期）

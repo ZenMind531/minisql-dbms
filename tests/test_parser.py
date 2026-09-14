@@ -5,6 +5,7 @@ from database_system.sql_compiler.ast_nodes import (
     BinaryOperator,
     CreateTableStmt,
     DeleteStmt,
+    DropTableStmt,
     IdentifierExpr,
     InsertStmt,
     LiteralExpr,
@@ -13,6 +14,7 @@ from database_system.sql_compiler.ast_nodes import (
     TypeKind,
     UnaryExpr,
     UnaryOperator,
+    UpdateStmt,
 )
 from database_system.sql_compiler.lexer import Lexer
 from database_system.sql_compiler.parser import Parser
@@ -77,6 +79,35 @@ class ParserStatementTests(unittest.TestCase):
             [type(statement) for statement in statements],
             [CreateTableStmt, InsertStmt, SelectStmt, DeleteStmt],
         )
+
+    def test_parses_drop_update_and_limit(self) -> None:
+        drop = parse("DROP TABLE student;")[0]
+        update = parse(
+            "UPDATE student SET name = 'Alice', age = age + 1 WHERE id = 7;"
+        )[0]
+        select = parse(
+            "SELECT name FROM student ORDER BY age DESC LIMIT 10;"
+        )[0]
+
+        self.assertIsInstance(drop, DropTableStmt)
+        self.assertEqual((drop.table, drop.line, drop.column), ("student", 1, 1))
+        self.assertIsInstance(update, UpdateStmt)
+        self.assertEqual(
+            [assignment.column_name for assignment in update.assignments],
+            ["name", "age"],
+        )
+        self.assertEqual(update.assignments[0].value.value, "Alice")
+        self.assertEqual(update.assignments[1].value.op, BinaryOperator.ADD)
+        self.assertIsInstance(update.where, BinaryExpr)
+        self.assertEqual(select.limit.count, 10)
+        self.assertEqual((select.limit.line, select.limit.column), (1, 44))
+
+    def test_update_where_is_optional_and_limit_zero_is_valid(self) -> None:
+        update = parse("UPDATE student SET age = 20;")[0]
+        select = parse("SELECT * FROM student LIMIT 0;")[0]
+
+        self.assertIsNone(update.where)
+        self.assertEqual(select.limit.count, 0)
 
 
 class ParserExpressionTests(unittest.TestCase):
@@ -170,6 +201,22 @@ class ParserErrorTests(unittest.TestCase):
     def test_excessive_parentheses_raise_parse_error_not_recursion_error(self) -> None:
         source = "SELECT * FROM t WHERE " + "(" * 1100 + "a = 1" + ")" * 1100 + ";"
         self.assert_parse_error(source, "nesting")
+
+    def test_drop_update_and_limit_report_missing_or_invalid_parts(self) -> None:
+        invalid = [
+            ("DROP student;", "TABLE"),
+            ("DROP TABLE;", "IDENTIFIER"),
+            ("UPDATE student age = 1;", "SET"),
+            ("UPDATE student SET;", "IDENTIFIER"),
+            ("UPDATE student SET age 1;", "="),
+            ("UPDATE student SET age =;", "expression"),
+            ("SELECT * FROM student LIMIT;", "LIMIT"),
+            ("SELECT * FROM student LIMIT -1;", "LIMIT"),
+            ("SELECT * FROM student LIMIT 1.5;", "LIMIT"),
+        ]
+        for source, expected in invalid:
+            with self.subTest(source=source):
+                self.assert_parse_error(source, expected)
 
 
 if __name__ == "__main__":
