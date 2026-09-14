@@ -53,6 +53,20 @@ def _column_index(schema: TableSchema) -> dict[str, int]:
     return {column.name: position for position, column in enumerate(schema.columns)}
 
 
+def _place(values: list, positions: list[int] | None, width: int) -> tuple:
+    """把 VALUES 摆到建表顺序上。
+
+    positions 为 None 表示语句没写列名，值就按源码顺序；否则按列名落位。
+    语义层已保证列名存在、不重复、且覆盖全部列，所以这里不必再兜底。
+    """
+    if positions is None:
+        return tuple(values)
+    row: list[Any] = [None] * width
+    for position, value in zip(positions, values):
+        row[position] = value
+    return tuple(row)
+
+
 def _evaluate(expr: Expr, row: tuple | None, index: dict[str, int]) -> Any:
     """按行求值一个表达式；INSERT 的 VALUES 没有源行，此时 row 为 None。"""
     if isinstance(expr, LiteralExpr):
@@ -151,9 +165,15 @@ class Executor:
     def _insert(self, plan: Insert) -> str:
         schema = self._require_table(plan.table)
         index = _column_index(schema)
+        # 语句写了列名就查它们在表里的位置，没写则按建表顺序原样落位
+        positions = (
+            None if plan.columns is None
+            else [index[name] for name in plan.columns]
+        )
         inserted = 0
         for values in plan.rows:
-            row = tuple(_evaluate(value, None, index) for value in values)
+            evaluated = [_evaluate(value, None, index) for value in values]
+            row = _place(evaluated, positions, len(schema.columns))
             self.engine.insert_row(plan.table, row)
             inserted += 1
         return f"{inserted} row(s) inserted"

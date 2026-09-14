@@ -532,3 +532,37 @@ def test_insert_row_wider_than_a_page_raises_storage_error(tmp_path: Path) -> No
         assert db.execute("SELECT * FROM wide;") == ""
     finally:
         db.close()
+
+
+# ---------- INSERT 列名落位 ----------
+
+
+def test_insert_maps_values_by_column_name_not_source_order(tmp_path: Path) -> None:
+    """列名决定落位，VALUES 的书写顺序不算数。
+
+    过去 planner 丢弃 stmt.columns，执行器按源码顺序组行，于是
+    INSERT INTO t(b, a) VALUES (1, 2) 静默存成 (1, 2)：两列都是 INT，
+    类型检查毫无察觉，数据反着进库还没人吭声。
+    """
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(a INT, b INT);")
+
+        db.execute("INSERT INTO t(b, a) VALUES (1, 2);")
+
+        assert db.execute("SELECT * FROM t;") == "(2, 1)"
+    finally:
+        db.close()
+
+
+def test_insert_reordered_columns_works_across_types(tmp_path: Path) -> None:
+    """三列全打乱且跨 INT/VARCHAR —— 落位靠列名，不靠位置。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE student(id INT, name VARCHAR(32), age INT);")
+
+        db.execute("INSERT INTO student(name, age, id) VALUES ('Alice', 20, 1);")
+
+        assert db.execute("SELECT * FROM student;") == "(1, 'Alice', 20)"
+    finally:
+        db.close()
