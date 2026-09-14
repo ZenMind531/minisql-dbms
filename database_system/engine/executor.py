@@ -23,8 +23,8 @@ from database_system.sql_compiler.ast_nodes import (
 )
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import (
-    CreateTable, Delete, Filter, Insert, PlanNode, Project, SeqScan,
-    ShowDatabases, ShowTables, Sort,
+    CreateTable, Delete, DropTable, Filter, Insert, PlanNode, Project,
+    SeqScan, ShowDatabases, ShowTables, Sort,
 )
 from database_system.utils.errors import ExecError
 
@@ -139,13 +139,15 @@ class Executor:
             return self._insert(plan)
         if isinstance(plan, Delete):
             return self._delete(plan)
+        if isinstance(plan, DropTable):
+            return self._drop_table(plan)
         if isinstance(plan, ShowDatabases):
             return [(self.engine.data_dir.name or str(self.engine.data_dir),)]
         if isinstance(plan, ShowTables):
             return [(name,) for name in self.catalog.table_names(include_system=False)]
         if isinstance(plan, (SeqScan, Filter, Project, Sort)):
             return self._select(plan)
-        # 前端解析得出来、执行器还没实现的节点（DropTable、Update 等）。
+        # 前端解析得出来、执行器还没实现的节点（Update 等）。
         # 不能默认丢给 _select：那里要顺着 child 找 SeqScan，而这些节点
         # 根本没有 child，抛出的 AttributeError 会穿透 CLI 崩掉整个 REPL。
         raise ExecError(f"不支持的查询计划: {type(plan).__name__}")
@@ -183,6 +185,16 @@ class Executor:
         index = _column_index(schema)
         deleted = self.engine.delete_where(plan.table, self._predicate(plan.child, index))
         return f"{deleted} row(s) deleted"
+
+    def _drop_table(self, plan: DropTable) -> str:
+        # 与 _create_table 对称：没有 CatalogManager 时（两参数构造器）
+        # 自己按同样的顺序收尾——先摘内存这个不会失败的动作，再删文件
+        if self.catalog_manager is None:
+            self.catalog.drop_table(plan.table)
+            self.engine.remove_table(plan.table)
+        else:
+            self.catalog_manager.drop_table(plan.table, self.catalog)
+        return "OK"
 
     def _select(self, plan: PlanNode) -> list[tuple]:
         table = _base_table(plan)

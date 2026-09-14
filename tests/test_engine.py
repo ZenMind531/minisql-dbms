@@ -11,7 +11,7 @@ from database_system.sql_compiler.ast_nodes import ColumnDef, TypeKind, TypeSpec
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import CreateTable
 from database_system.utils.constants import PAGE_SIZE
-from database_system.utils.errors import ExecError, StorageError
+from database_system.utils.errors import ExecError, SemanticError, StorageError
 
 
 def column(name: str, kind: TypeKind, length: int | None = None) -> ColumnDef:
@@ -485,21 +485,27 @@ def test_executor_two_argument_constructor_remains_supported(tmp_path: Path) -> 
 # 语义层只管类型、不管取值范围与行宽，引擎层是最后一道防线。
 
 
-def test_drop_table_reports_exec_error_instead_of_crashing(tmp_path: Path) -> None:
-    """DROP TABLE 前端已能解析、执行器尚未实现，必须干净报错。
+def test_unimplemented_plan_reports_exec_error_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    """前端解析得出来、执行器还没有分支的节点，必须干净报错。
 
-    过去它掉进 execute() 的默认分支 _select()，_base_table() 访问 plan.child
-    时抛 AttributeError —— 不是 MiniSQLError，CLI 不接，整个 REPL 带
-    traceback 退出。
+    过去这类节点掉进 execute() 的默认分支 _select()，_base_table() 访问
+    plan.child 时抛 AttributeError —— 不是 MiniSQLError，CLI 不接，
+    整个 REPL 带 traceback 退出。
+
+    UPDATE 正是下一个这样的节点：语义层已经放行，执行器还没实现。
+    DROP TABLE 也当过一阵子哨兵，现在它自己已经实现了。
     """
     db = MiniDB(str(tmp_path))
     try:
         db.execute("CREATE TABLE student(id INT);")
+        db.execute("INSERT INTO student VALUES (1);")
 
-        with pytest.raises(ExecError, match="DropTable"):
-            db.execute("DROP TABLE student;")
+        with pytest.raises(ExecError, match="Update"):
+            db.execute("UPDATE student SET id = 2;")
 
-        assert (tmp_path / "student.dat").is_file()  # 表还在，没被删掉
+        assert db.execute("SELECT * FROM student;") == "(1,)"  # 数据没被动
     finally:
         db.close()
 
@@ -530,6 +536,75 @@ def test_insert_row_wider_than_a_page_raises_storage_error(tmp_path: Path) -> No
             db.execute(f"INSERT INTO wide VALUES ({values});")
 
         assert db.execute("SELECT * FROM wide;") == ""
+    finally:
+        db.close()
+
+
+# ---------- DROP TABLE ----------
+# 前端（AST / 语义 / 计划节点）和存储层（remove_table）都齐了，缺的一直是
+# 执行器这一环——DROP 掉进兜底分支报"不支持的查询计划"，表纹丝不动。
+
+
+def test_drop_table_removes_file_and_metadata(tmp_path: Path) -> None:
+    """DROP 要真的删干净：磁盘文件、内存元数据，一样都不能留。
+
+    光删文件不摘内存，"幽灵表"就来了——SHOW TABLES 还列得出来，
+    SELECT 语义层照样放行，一路走到扫描才炸。
+    """
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE student(id INT);")
+        db.execute("INSERT INTO student VALUES (1);")
+        assert (tmp_path / "student.dat").is_file()
+
+        assert db.execute("DROP TABLE student;") == "OK"
+
+        assert not (tmp_path / "student.dat").exists()
+        assert db.execute("SHOW TABLES;") == ""
+        with pytest.raises(SemanticError, match="does not exist"):
+            db.execute("SELECT * FROM student;")
+    finally:
+        db.close()
+
+
+def test_dropped_table_stays_dropped_after_restart(tmp_path: Path) -> None:
+    """目录登记删干净了，重启后表不会"复活"。
+
+    这条盯的是删除顺序。若先删 .dat 再删 __catalog__ 里的登记行，中途失败
+    就留下"目录说有、文件没有"的状态，下次 CatalogManager.load() 直接报错，
+    整个数据库打不开。所以不可逆的删文件必须排在最后。
+    """
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE student(id INT);")
+        db.execute("CREATE TABLE keeper(id INT);")
+        assert db.execute("DROP TABLE student;") == "OK"
+    finally:
+        db.close()
+
+    reopened = MiniDB(str(tmp_path))
+    try:
+        assert reopened.execute("SHOW TABLES;") == "('keeper',)"
+        with pytest.raises(SemanticError, match="does not exist"):
+            reopened.execute("SELECT * FROM student;")
+        assert reopened.execute("SELECT * FROM keeper;") == ""
+    finally:
+        reopened.close()
+
+    assert not (tmp_path / "student.dat").exists()
+
+
+def test_recreating_a_dropped_table_starts_empty(tmp_path: Path) -> None:
+    """DROP 之后同名表能重建，且是张空表——内存摘干净了才做得到。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(id INT, name VARCHAR(8));")
+        db.execute("INSERT INTO t VALUES (1, 'Alice');")
+        db.execute("DROP TABLE t;")
+
+        assert db.execute("CREATE TABLE t(id INT, name VARCHAR(8));") == "OK"
+
+        assert db.execute("SELECT * FROM t;") == ""  # 旧数据没跟着复活
     finally:
         db.close()
 

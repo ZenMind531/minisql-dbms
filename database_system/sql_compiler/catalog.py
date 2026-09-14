@@ -65,6 +65,14 @@ class Catalog:
 
         self._tables[name] = TableSchema(name=name, columns=deepcopy(columns))
 
+    def drop_table(self, name: str) -> None:
+        """注销一张表的内存元数据；名字不存在时安静跳过。
+
+        语句级的"表不存在"归语义层管，这里再抛一次只会让错误的归属变乱。
+        幂等也让调用方不必先查存在性。
+        """
+        self._tables.pop(name, None)
+
     def find_table(self, name: str) -> TableSchema | None:
         """Return a schema snapshot, or None if the table does not exist."""
         schema = self._tables.get(name)

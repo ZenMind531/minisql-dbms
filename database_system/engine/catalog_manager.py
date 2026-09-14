@@ -177,5 +177,20 @@ class CatalogManager:
             raise
         catalog.create_table(schema.name, schema.columns)
 
+    def drop_table(self, table: str, catalog: Catalog) -> None:
+        """删除一张用户表：先删目录登记，再摘内存，最后删文件。
+
+        顺序是有意的。前两步只动可回滚的元数据，把不可逆的删文件留到
+        最后——中途失败最坏剩一个没人认识的孤儿文件；反过来先删文件，
+        就会留下"目录说有、文件没有"的状态，下次 load() 直接报错，
+        整个数据库打不开。
+        """
+        self.engine.delete_where(CATALOG_TABLE, lambda row: row[0] == table)
+        self.engine.flush()
+        # 内存摘除不会失败，放在删文件之前：即使删文件失败，
+        # 内存与目录仍是一致的，都认为这张表没有了
+        catalog.drop_table(table)
+        self.engine.remove_table(table)
+
 
 __all__ = ["CATALOG_SCHEMA", "CatalogManager"]
