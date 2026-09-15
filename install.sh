@@ -30,6 +30,17 @@ fi
 echo "==> 安装测试依赖 ..."
 ./.venv/bin/pip install --quiet pytest
 
+echo "==> 安装 minidb 和 minidatagrip 命令 ..."
+launcher_dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+./.venv/bin/python -m database_system.command_installer \
+    --project-root "$(pwd)" --bin-dir "$launcher_dir" --platform linux
+
+profile_file="$HOME/.profile"
+path_line='export PATH="$HOME/.local/bin:$PATH"'
+if [ "$launcher_dir" = "$HOME/.local/bin" ] && ! grep -Fqx "$path_line" "$profile_file" 2>/dev/null; then
+    printf '\n%s\n' "$path_line" >> "$profile_file"
+fi
+
 # ---- 成功动画：MiniDB 大字 logo 逐行点亮（树莓派风格）----
 green=$'\033[32m'; bold=$'\033[1m'; reset=$'\033[0m'
 
@@ -52,5 +63,6 @@ LOGO
 sleep 0.2
 printf "${bold}${green}  ✅ MiniDB 安装成功！${reset}\n"
 echo ""
-echo "  启动数据库: ./start.sh"
+echo "  重新登录终端后: minidb"
+echo "  启动桌面 GUI:  minidatagrip"
 echo "  跑全部测试: ./.venv/bin/python -m pytest tests -v"

@@ -7,8 +7,9 @@
 结构化查询结果、编译或执行错误、原始逻辑计划和优化后逻辑计划，并作为课程验收
 中的独立亮点功能进行演示。
 
-第一版以 SQL 编辑器为主要操作入口，不提供新建表、插入行、修改行或删除行的
-图形化表单。用户通过 SQL 完成这些操作，GUI 负责编辑、执行、展示和定位错误。
+第一版定位为轻量版 DataGrip：既提供 SQL 工作台，也提供新建表、删除表、浏览
+数据、新增行、修改行和删除行的图形化入口。所有写操作都生成 SQL，并通过正常的
+MiniSQL 编译和执行链完成；GUI 不直接修改 Catalog、页面或数据文件。
 
 ## 2. 范围
 
@@ -16,6 +17,10 @@
 
 - 打开或切换 MiniSQL 数据目录；
 - 浏览当前数据库中的表、字段和字段类型；
+- 通过对话框新建表，并预览生成的 `CREATE TABLE`；
+- 通过对象树右键菜单打开数据、刷新或删除表；
+- 在数据编辑器中新增、修改和删除行；
+- 使用多个 SQL 控制台标签页；
 - 编辑并执行一条或多条以分号结束的 SQL；
 - 使用 `Ctrl+Enter` 执行 SQL；
 - 用表格展示查询结果，用消息展示非查询语句的执行结果；
@@ -27,15 +32,16 @@
 
 ### 2.2 第一版不包含
 
-- 增删改数据的图形化表单；
+- `ALTER TABLE`、索引、外键和表结构设计器；
 - 多个数据库连接并行运行；
 - 用户、权限、网络连接或远程数据库；
 - SQL 自动补全、语法高亮和代码格式化；
 - 查询成本估计、物理执行计划或运行时性能剖析；
 - Web 服务、第三方 GUI 框架或第三方图形库。
 
-`DROP TABLE`、`UPDATE` 和 `LIMIT` 只在其现有执行链真正接通后由 GUI 正常展示。
-GUI 不捕获并伪装这些功能的未实现错误，也不在界面层补写数据库执行逻辑。
+`DROP TABLE` 和 `LIMIT` 已接通执行链，可由 GUI 使用。`UPDATE` 只在执行器接通后
+启用图形化修改；接通前按钮保持禁用并说明原因。GUI 不捕获并伪装未实现错误，也
+不在界面层补写数据库执行逻辑。
 
 ## 3. 界面设计
 
@@ -45,25 +51,39 @@ GUI 不捕获并伪装这些功能的未实现错误，也不在界面层补写�
 ┌──────────────────────────────────────────────────────────────┐
 │ 数据目录  刷新  执行 SQL  清空编辑器                 状态 │
 ├────────────────┬─────────────────────────────────────────────┤
-│ 对象浏览器     │ SQL 编辑器                                  │
+│ 对象浏览器     │ SQL 控制台 1 | SQL 控制台 2 | +             │
 │                │                                             │
 │ ▾ student      │ SELECT name FROM student                    │
 │   id INT       │ WHERE age > 18;                             │
 │   name VARCHAR │                                             │
 │                ├─────────────────────────────────────────────┤
-│ ▸ course       │ 执行结果 | 原始计划 | 优化后计划 | JSON | 消息 │
+│ ▸ course       │ 数据 | 原始计划 | 优化后计划 | JSON | 消息 │
 │                │                                             │
 └────────────────┴─────────────────────────────────────────────┘
 ```
 
 - 左侧使用 `ttk.Treeview` 展示数据目录、表和列；
-- 右上使用 `tk.Text` 作为多行 SQL 编辑器；
+- 对象树提供新建表、打开数据、刷新和删除表的右键菜单；
+- 右上使用 `ttk.Notebook` 管理多个 `tk.Text` SQL 控制台；
 - 右下使用 `ttk.Notebook` 管理五个结果标签页；
 - 查询结果使用 `ttk.Treeview`，列由结构化结果动态创建；
+- 数据结果上方提供新增行、修改行、删除行和刷新按钮；
 - 原始计划与优化后计划采用独立标签页切换，不在第一版实现计划差异算法；
 - 计划树第一版使用等宽文本展示 `plan_to_tree()` 的结果；
 - 状态栏显示当前数据目录、执行状态、耗时和返回行数；
 - 运行期间禁用重复执行和数据目录切换操作。
+
+### 3.1 图形化操作规则
+
+- 新建表对话框收集表名、字段名和 `INT`/`VARCHAR(n)` 类型，生成并执行
+  `CREATE TABLE`；
+- 打开表数据生成 `SELECT * FROM <table> LIMIT 200`，避免一次加载过多记录；
+- 新增行根据完整表模式生成 `INSERT`，字符串使用 SQL 单引号转义；
+- 修改行生成 `UPDATE ... SET ... WHERE ...`；执行器未支持 `UPDATE` 时禁用；
+- 删除选中行生成带完整旧行条件的 `DELETE`。由于当前系统没有主键，该条件可能
+  删除内容完全相同的多行，确认框必须明确展示 SQL 和这一风险；
+- 删除表显示生成的 `DROP TABLE` 并要求二次确认；
+- 所有生成 SQL 都写入消息日志，便于课堂解释和问题复现。
 
 ## 4. 架构
 
@@ -74,9 +94,9 @@ Tkinter View
     ↓ GuiCommand
 GuiController
     ↓ WorkerRequest
-DatabaseWorker（唯一 MiniDB 所有者）
+DatabaseWorker（唯一 DatabaseService 所有者）
     ↓
-MiniDB.execute_detailed()
+DatabaseService.execute()
     ↓
 Lexer → Parser → Semantic → Planner → Optimizer → Executor
     ↓ ExecutionBatch
@@ -96,16 +116,16 @@ database_system/gui/
 └── worker.py       # 单工作线程、请求队列和响应队列
 ```
 
-GUI 不直接访问 Page、BufferPool、StorageEngine 或 Executor。它只通过新增的结构化
-执行入口访问 `MiniDB`，从而保持模块边界清晰。
+GUI 不直接访问 Page、BufferPool 或 StorageEngine。`DatabaseService` 复用现有
+MiniDB 持有的编译器与 Executor 对象并返回结构化结果，从而不修改冻结引擎接口。
 
 ## 5. 结构化执行接口
 
-现有 `MiniDB.execute(sql) -> str` 必须保留，CLI 行为不得改变。为 GUI 增加一个
-向后兼容的入口：
+现有 `MiniDB.execute(sql) -> str` 保持不变，CLI 行为不得改变。GUI 在自身模块中
+提供结构化适配入口：
 
 ```python
-MiniDB.execute_detailed(sql: str) -> ExecutionBatch
+DatabaseService.execute(sql: str) -> ExecutionBatch
 ```
 
 `ExecutionBatch` 包含按源码顺序排列的 `StatementResult`。每个结果至少包含：
@@ -126,8 +146,7 @@ MiniDB.execute_detailed(sql: str) -> ExecutionBatch
 使用表模式列名，`SHOW DATABASES` 和 `SHOW TABLES` 使用固定展示列名。不得通过
 解析 CLI 格式化字符串推断表格结构。
 
-该接口涉及成员 D 负责的 `MiniDB`，实现和合入前需要 D 复核。它是新增接口，
-不会修改冻结契约中已有方法的参数或返回值。
+该适配器位于 GUI 模块，不改变成员 D 负责的 `MiniDB` 公共接口，也不修改冻结契约。
 
 ## 6. 并发与生命周期
 
@@ -208,7 +227,7 @@ SELECT name FROM student WHERE 1 = 1 AND age > 10 + 8;
 ## 11. 职责与评审
 
 - 成员 A 负责 GUI 展示、控制器、计划展示和相应测试；
-- `MiniDB.execute_detailed()` 属于与成员 D 的最小集成点，必须由 D 复核；
+- `DatabaseService` 只适配现有流水线；若以后进入 `MiniDB` 公共接口，必须由 D 复核；
 - 不修改成员 B 负责的 Plan 节点或 Optimizer 规则；
 - 不修改成员 C 负责的页式存储和缓存算法；
 - 如结构化接口需要进入冻结契约，必须经过全组评审后再更新契约。
