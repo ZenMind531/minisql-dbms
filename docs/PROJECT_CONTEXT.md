@@ -14,8 +14,8 @@ MiniSQL 是使用 Python 3.11 标准库实现的教学型关系数据库，面�
 - 4KB slotted page、LRU/FIFO 缓冲池和磁盘持久化；
 - REPL、SQL 文件执行和 `--compile-only` 编译器演示。
 
-`DROP TABLE`、`UPDATE`、`LIMIT` 当前已完成词法、AST、语法、语义和逻辑计划，
-尚未接通执行器，不能端到端执行。
+`DROP TABLE` 和 `LIMIT` 已端到端接通；`UPDATE` 已完成词法、AST、语法、语义和
+逻辑计划，尚未接通执行器。
 `JOIN`、`GROUP BY`、事务、并发控制和索引不在当前范围。
 
 ## 2. 权威文档与优先级
@@ -87,10 +87,9 @@ SQL → Lexer → Token → Parser → AST
 - 契约冲突待评审：契约写“存储错误抛 `StorageError`”，但 `FileManager.read_page` 的越界/坏 magic 需抛 `ValueError` 才能被引擎正确包装（`tests/test_engine.py` 依赖此行为）。详见 `docs/C-review-drop-update.md` 第 4 节。
 - SHOW / ORDER BY 是已实现扩展，但冻结的三份契约尚未同步这些新增节点；若要
   把扩展接口正式冻结，需要 B、C、D 与全组评审，成员 A 不单独改契约。
-- DROP TABLE / UPDATE / LIMIT 的语义分析和计划构建已完成，尚待 D 完成执行器集成。
-  新增 AST 和计划节点必须在端到端接入前由 D 与全组评审冻结。
-- LIMIT 现已正确传递到计划层，但执行器尚未实现 Limit 节点，所以通过 MiniDB 执行时
-  仍会返回全部行。UPDATE 和 DROP TABLE 的执行器实现也待 D 完成。
+- DROP TABLE / UPDATE / LIMIT 的语义分析和计划构建已完成，DROP TABLE 与 LIMIT
+  已端到端接通；UPDATE 尚待 D 完成执行器集成。新增 AST 和计划节点仍需由 D 与
+  全组评审冻结。
 
 ## 5. 关键设计决定
 
@@ -128,7 +127,7 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
 ## 7. 下一步
 
 1. 用 quickstart 完成三阶段验收，并整理 T036 整组测试报告。
-2. 由 D 接入 DROP TABLE、UPDATE、LIMIT 的执行器，再由全组统一
+2. 由 D 接入 UPDATE 的执行器，再由全组统一
    评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
 3. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
 4. 成员 D 复核桌面 GUI 的结构化执行接口后，按设计文档编写测试先行的实施计划。
@@ -136,8 +135,10 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
 ### 已批准的桌面 GUI 设计
 
 - 已批准使用 Python 3.11 标准库 `tkinter`/`ttk` 实现 SQL Studio 工作台；
-- 第一版采用左侧对象浏览器、右上 SQL 编辑器、右下结果/原始计划/优化后计划/
-  JSON/消息标签页，不提供增删改图形化表单；
+- 第一版升级为轻量版 DataGrip：左侧对象浏览器、右上多标签 SQL 控制台、右下
+  数据/原始计划/优化后计划/JSON/消息标签页；
+- 提供新建表、删除表、浏览数据、新增行、修改行和删除行的图形化入口，所有写
+  操作均生成 SQL 并通过正常编译执行链完成；
 - 采用 Controller、单后台工作线程和结构化执行结果，保持现有
   `MiniDB.execute()` 兼容；
 - 设计见 `docs/superpowers/specs/2026-09-14-minisql-desktop-gui-design.md`；
