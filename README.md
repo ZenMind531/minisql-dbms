@@ -27,15 +27,14 @@ MiniDataGrip 是 MiniSQL 教学数据库的桌面管理工具。项目使用 Pyt
 ```powershell
 git clone https://github.com/ZenMind531/minisql-dbms.git
 cd minisql-dbms
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
-.\start_gui.ps1
+install.cmd
 ```
 
-启动命令行版本：
+安装完成后重新打开终端，直接使用：
 
-```powershell
-.\start.ps1
+```text
+minidb          # 启动 CLI
+minidatagrip    # 启动 GUI
 ```
 
 ### Linux
@@ -48,23 +47,16 @@ sudo apt-get install -y python3.11 python3.11-venv python3-tk
 git clone https://github.com/ZenMind531/minisql-dbms.git
 cd minisql-dbms
 bash install.sh
-./.venv/bin/python -m database_system.gui
 ```
 
-命令行版本使用 `bash start.sh`。Linux GUI 需要桌面环境或已配置的 X11/Wayland；纯 SSH 终端可以使用 CLI，但不能直接显示 Tkinter 窗口。
+安装完成后重新登录终端，使用 `minidb` 启动 CLI，使用 `minidatagrip` 启动 GUI。Linux GUI 需要桌面环境或已配置的 X11/Wayland；纯 SSH 终端可以使用 CLI，但不能直接显示 Tkinter 窗口。
 
 ## 使用 MiniDataGrip GUI
 
 ### 启动
 
-```powershell
-# Windows
-.\start_gui.ps1
-```
-
-```bash
-# Linux
-./.venv/bin/python -m database_system.gui
+```text
+minidatagrip
 ```
 
 默认数据保存在项目的 `data/` 目录。点击顶部“打开目录”可以切换数据库目录；关闭程序时会完成存储收尾和数据落盘。
@@ -115,12 +107,8 @@ SHOW TABLES;
 
 进入交互模式：
 
-```powershell
-.\start.ps1             # Windows
-```
-
-```bash
-bash start.sh           # Linux
+```text
+minidb
 ```
 
 输入以分号结束的 SQL；语句可以跨行。输入 `exit;` 或 `quit;` 退出。
@@ -146,6 +134,8 @@ bash start.sh --compile-only tests/sql/demo_compiler.sql
 ```
 
 使用 `.\start.ps1 --help` 或 `bash start.sh --help` 查看全部参数。
+
+全局命令会记录安装时的项目目录；移动或删除仓库后，请在新目录重新运行 `install.cmd` 或 `bash install.sh`。Windows 安装器将命令加入当前用户 `PATH`，无需管理员权限，也不受 PowerShell 脚本执行策略影响。
 
 ## 系统架构
 
@@ -188,7 +178,7 @@ GUI 专项测试：
 .\.venv\Scripts\python.exe -m pytest tests/test_gui_app.py tests/test_gui_controller.py tests/test_gui_dialogs.py tests/test_gui_service.py tests/test_gui_sql_builder.py tests/test_gui_theme.py -q
 ```
 
-当前验证结果：GUI 专项 `20 passed`；完整回归 `293 passed, 4 skipped, 171 subtests passed`。缺少图形显示环境时，少量 Tkinter 测试可能被跳过。
+当前验证结果：GUI 专项 `20 passed`；完整回归 `296 passed, 3 skipped, 171 subtests passed`。缺少图形显示环境时，少量 Tkinter 测试可能被跳过。
 
 ## 数据与注意事项
 

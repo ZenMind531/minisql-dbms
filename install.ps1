@@ -33,8 +33,21 @@ Write-Host "==> 创建 Python 3.11 虚拟环境"
 Write-Host "==> 安装 pytest"
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip pytest
 
+Write-Host "==> 安装 minidb 和 minidatagrip 命令"
+$launcherDir = Join-Path $env:LOCALAPPDATA "MiniDataGrip\bin"
+& .\.venv\Scripts\python.exe -m database_system.command_installer `
+    --project-root $PSScriptRoot --bin-dir $launcherDir --platform windows
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$pathEntries = @($userPath -split ";" | Where-Object { $_ })
+if ($launcherDir -notin $pathEntries) {
+    $newUserPath = (($pathEntries + $launcherDir) -join ";")
+    [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+}
+
 Write-Host ""
-Write-Host "MiniDB 环境准备完成。启动命令："
-Write-Host "  .\start.ps1"
+Write-Host "MiniDB 环境准备完成。重新打开终端后可直接使用："
+Write-Host "  minidb          # 命令行"
+Write-Host "  minidatagrip    # 桌面 GUI"
 Write-Host "完整测试："
 Write-Host "  .\.venv\Scripts\python.exe -m pytest tests -v"
