@@ -27,7 +27,7 @@ MiniDataGrip 是 MiniSQL 教学数据库的桌面管理工具。项目使用 Pyt
 ```powershell
 git clone https://github.com/ZenMind531/minisql-dbms.git
 cd minisql-dbms
-install.cmd
+.\install.cmd
 ```
 
 `install.cmd` 会绕过脚本执行策略，并兼容 Windows PowerShell 5.1。安装完成后重新打开终端，直接使用：
