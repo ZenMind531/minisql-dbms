@@ -21,17 +21,17 @@
 | **存储层** | `test_storage.py` | 9 | 4KB slotted page 的增删改查与序列化 |
 | | `test_buffer.py` | 5 | LRU/FIFO 淘汰、pin、脏页回写 |
 | | `test_storage_persist.py` | 1 | 跨进程持久化 |
-| **引擎与目录** | `test_engine.py` | 38 | 目录持久化、损坏数据拒绝、建表回滚、DROP/LIMIT |
+| **引擎与目录** | `test_engine.py` | 44 | 目录持久化、损坏数据拒绝、建表回滚、DROP/LIMIT/UPDATE |
 | | `test_catalog.py` | 13 | 内存元数据的校验与不可变性 |
 | **组合验证** | `test_new_features.py` | 20 | DROP/UPDATE/LIMIT/SHOW/ORDER BY 的语义与计划 |
 | | `test_show_order.py` | 6 | SHOW 与多列 ORDER BY 端到端 |
 | | `test_errors.py` | 15 | 五类错误的契约（type/line/column/message） |
 | | `test_demo.py` | 19 | 编译管线各阶段与 `--compile-only` 入口 |
 | **端到端与 CLI** | `test_e2e.py` | 3 | 真实子进程跑脚本 + 重启后数据仍在 |
-| | `test_cli.py` | 7 | 命令行三种模式、错误出口、readline 历史 |
+| | `test_cli.py` | 19 | 命令行三种模式、错误出口、readline 历史、REPL 多行语句 |
 | | `test_sql_cases.py` | 3 | 34 条命名 SQL 用例集的驱动与覆盖校验 |
 | | `tests/sql/compiler_cases.json` | (34) | 数据驱动的 SQL 用例（见 §9） |
-| | **合计** | **259** | |
+| | **合计** | **277** | |
 
 ---
 
@@ -287,7 +287,7 @@
 
 ## 4. 引擎与目录
 
-### 4.1 系统目录持久化 `tests/test_engine.py`（38）
+### 4.1 系统目录持久化 `tests/test_engine.py`（44）
 
 **引导与重建（3 条）**
 
@@ -332,13 +332,13 @@
 | `test_register_rejects_names_over_255_utf8_bytes_before_writing[table-name]` | 表名超 255 字节 → **写入前**就拒绝 |
 | `test_register_rejects_names_over_255_utf8_bytes_before_writing[later-column-name]` | 后续列名超限同样在写入前拒绝 |
 
-**执行器与端到端（15 条）**
+**执行器与端到端（21 条）**
 
 | 用例 | 验证什么 |
 |---|---|
 | `test_minidb_create_survives_close_and_restart` | `MiniDB` 建表 → 关闭 → 重启，表还在 |
 | `test_executor_two_argument_constructor_remains_supported` | 两参数构造器（无 CatalogManager）仍可用，向后兼容 |
-| `test_unimplemented_plan_reports_exec_error_instead_of_crashing` | **前端能解析、执行器没实现的节点必须干净报错**，且数据不被改动（当前以 `UPDATE` 为哨兵） |
+| `test_unknown_plan_reports_exec_error_instead_of_crashing` | **执行器不认识的计划节点必须干净报错**而不是崩掉 REPL，且数据不被改动（用自造的 `_UnknownPlan` 节点，不依赖「哪个功能恰好还没做」） |
 | `test_insert_int_out_of_range_raises_storage_error` | 超出 `INT` 范围的值报 `StorageError` |
 | `test_insert_row_wider_than_a_page_raises_storage_error` | 单行宽度超过一页 → 报 `StorageError` |
 | `test_insert_maps_values_by_column_name_not_source_order` | 值的落位按**列名**而非书写顺序 |
@@ -351,6 +351,17 @@
 | `test_limit_beyond_the_table_returns_everything` | `LIMIT` 超过总行数 → 返回全部 |
 | `test_limit_applies_after_order_by` | **先排序再截断**——若顺序反了会拿到「最小的 n 个」而不是「前 n 个」 |
 | `test_limit_applies_after_where` | 先过滤再截断 |
+
+**UPDATE 执行（6 条）** ← `T038` 扩展项，`spec.md` 原不在范围内
+
+| 用例 | 验证什么 |
+|---|---|
+| `test_update_changes_only_matching_rows` | `WHERE` 命中的行才改，未命中的原样保留 |
+| `test_update_without_where_rewrites_every_row` | 没有 `WHERE` 是改全表，不是报错也不是空操作 |
+| `test_update_with_no_matching_row_reports_zero` | 一条都不匹配 → 如实报 `0 row(s) updated` |
+| `test_update_evaluates_every_assignment_against_the_original_row` | **`SET a = b, b = a` 必须能交换**——右边统一拿原行求值。若边改边取，第二次读到的是刚改过的列 |
+| `test_update_that_overflows_int_leaves_the_row_untouched` | 改出 `INT` 越界的值 → 报错**且那一行不动**（先整页收集再落盘，抛错时一行都还没写） |
+| `test_updated_rows_survive_a_restart` | 改完的值真落盘，重启后还在 |
 
 ### 4.2 内存目录 `tests/test_catalog.py`（13）
 
@@ -502,7 +513,9 @@
 | `test_demo_data_survives_a_restart` | 脚本跑完 → 重启进程 → 数据仍在 |
 | `test_hundred_rows_survive_query_delete_and_restart` | **SC-006**：建表 → 插入 ≥100 行 → 条件查询 → 删除 → 重启再查，一次通过 |
 
-### 6.2 命令行 `tests/test_cli.py`（7）
+### 6.2 命令行 `tests/test_cli.py`（19）
+
+**参数与批处理（4 条）**
 
 | 用例 | 验证什么 |
 |---|---|
@@ -510,9 +523,36 @@
 | `test_file_executes_sql_using_the_selected_data_directory` | `--file` 在指定数据目录上执行 |
 | `test_compile_only_reads_a_file_without_creating_the_data_directory` | **`--compile-only` 只读不建目录**（不产生副作用） |
 | `test_missing_file_is_a_clean_cli_error` | 文件不存在 → 干净错误，无 traceback |
+
+**readline 历史（3 条）**
+
+| 用例 | 验证什么 |
+|---|---|
 | `test_history_is_written_and_read_back` | readline 历史能写入并读回 |
 | `test_missing_history_file_is_not_an_error` | 首次运行没有历史文件 → 安静跳过 |
 | `test_unwritable_history_file_is_not_an_error` | 历史文件不可写 → 不影响 REPL 启动 |
+
+**REPL 续行判断（10 条）** — `_is_complete()`：攒到语句真正写完才送去解析
+
+| 用例 | 验证什么 |
+|---|---|
+| `test_a_statement_ending_with_a_semicolon_is_complete` | 分号收尾 → 完整 |
+| `test_an_unfinished_statement_is_not_complete` | `CREATE TABLE t (` 没写完 → 继续读下一行 |
+| `test_a_statement_over_several_lines_completes_at_the_semicolon` | 跨四行写，到 `);` 才判完整 |
+| `test_the_same_statement_without_its_semicolon_is_not_complete` | 内容齐全但**没有分号** → 仍不算完整 |
+| `test_a_semicolon_inside_a_string_does_not_complete_the_statement` | `VALUES ('a;b')` 里的分号不算数，否则在字符串中间把语句切走 |
+| `test_an_escaped_quote_keeps_the_scanner_inside_the_string` | **`''` 是转义引号不是收尾**——扫描器被骗出串外就会误判 |
+| `test_a_semicolon_inside_a_line_comment_does_not_complete` | `-- ;` 里的分号不算数 |
+| `test_a_semicolon_inside_a_block_comment_does_not_complete` | `/* ; */` 里的分号不算数 |
+| `test_a_comment_after_the_semicolon_still_completes` | `SELECT 1; -- done` 仍判完整（尾注释不影响） |
+| `test_empty_input_is_not_complete` | 空输入不完整 |
+
+**REPL 真进程（2 条）** — 唯一从外部驱动 REPL 的测试
+
+| 用例 | 验证什么 |
+|---|---|
+| `test_a_statement_spread_over_several_lines_runs` | `subprocess` 喂多行 stdin，建表 → 插入 → 查询全部成功（过去在此报 `ParseError: unexpected token EOF`） |
+| `test_a_semicolon_inside_a_string_does_not_split_the_statement` | 值里的分号不切断语句，`'a;b'` 原样查回 |
 
 ### 6.3 SQL 用例集驱动 `tests/test_sql_cases.py`（3）
 
@@ -550,7 +590,6 @@
 | **CLI 异常出口** | 无覆盖 | `cli/main.py` 的 `main()` 里 `db = MiniDB(arguments.data)` 在 `try` **之外**。数据目录损坏时抛 `StorageError` 会甩 traceback（引擎层有测试证明会抛 `StorageError`，但**没有一条测试从 CLI 喂过坏目录**） |
 | **SC-002 Fuzz** | 无覆盖 | 验收标准要求「固定随机种子 ≥10,000 条非法/随机输入，崩溃 0 次，错误归类且有有效行列号」。目前只有一次性手工探针，仓库内无正式用例 |
 | **深嵌套表达式** | 部分覆盖 | 前端有 `test_excessive_parentheses_raise_parse_error_not_recursion_error`，但**执行器侧没有对应防护**：`WHERE` 里 300 层 `AND` 链会 `RecursionError` |
-| **UPDATE 执行** | 语义/计划层已覆盖，执行层无 | Executor 尚未接入 `Update` 分支，见 `tasks.md` T038 |
 | **JOIN** | 无 | `spec.md:169` 明确列为不在当前范围 |
 
 ---

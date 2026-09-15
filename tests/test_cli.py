@@ -1,5 +1,7 @@
-"""CLI 参数与批处理模式测试。"""
+"""CLI 参数、批处理模式与 REPL 测试。"""
 
+import subprocess
+import sys
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -8,6 +10,8 @@ import unittest
 
 from database_system.cli import main as cli_main
 from database_system.cli.main import main
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class CliTests(unittest.TestCase):
@@ -129,6 +133,104 @@ class HistoryTests(unittest.TestCase):
             cli_main.readline.add_history("SELECT 1;")
 
             cli_main._save_history()  # 不抛异常即通过
+
+
+class StatementCompletionTests(unittest.TestCase):
+    """REPL 的续行判断：攒到语句真正写完才送去解析。
+
+    过去是一行一执行，``CREATE TABLE student (`` 第一行就被当成完整语句
+    ——输入到那儿就断了，解析器看到 EOF 直接报错；后面每一行又被当成
+    独立的语句接着报。多行书写是最自然的动作，这条路上谁都躲不过。
+    """
+
+    def test_a_statement_ending_with_a_semicolon_is_complete(self):
+        self.assertTrue(cli_main._is_complete("SELECT * FROM t;"))
+
+    def test_an_unfinished_statement_is_not_complete(self):
+        self.assertFalse(cli_main._is_complete("CREATE TABLE t ("))
+
+    def test_a_statement_over_several_lines_completes_at_the_semicolon(self):
+        text = "CREATE TABLE t (\n    id INT,\n    name VARCHAR(8)\n);"
+        self.assertTrue(cli_main._is_complete(text))
+
+    def test_the_same_statement_without_its_semicolon_is_not_complete(self):
+        text = "CREATE TABLE t (\n    id INT,\n    name VARCHAR(8)\n)"
+        self.assertFalse(cli_main._is_complete(text))
+
+    def test_a_semicolon_inside_a_string_does_not_complete_the_statement(self):
+        """字符串里的分号不算数，否则会在字符串中间把语句切走。"""
+        self.assertFalse(cli_main._is_complete("INSERT INTO t VALUES ('a;b')"))
+
+    def test_an_escaped_quote_keeps_the_scanner_inside_the_string(self):
+        """'' 是转义出来的引号，不是收尾——扫描器不能被骗出串外。"""
+        self.assertFalse(cli_main._is_complete("INSERT INTO t VALUES ('it''s;')"))
+
+    def test_a_semicolon_inside_a_line_comment_does_not_complete(self):
+        self.assertFalse(cli_main._is_complete("SELECT 1 -- ;"))
+
+    def test_a_semicolon_inside_a_block_comment_does_not_complete(self):
+        self.assertFalse(cli_main._is_complete("SELECT 1 /* ; */"))
+
+    def test_a_comment_after_the_semicolon_still_completes(self):
+        self.assertTrue(cli_main._is_complete("SELECT 1; -- done"))
+
+    def test_empty_input_is_not_complete(self):
+        self.assertFalse(cli_main._is_complete(""))
+
+
+class ReplTests(unittest.TestCase):
+    """真开一个进程喂多行输入。
+
+    REPL 是唯一没法从别的测试里覆盖的入口：``--file`` 走的是整文件读入，
+    ``--compile-only`` 走编译管线，都绕过了这个循环。
+    """
+
+    def run_repl(self, data_dir: Path, script: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable, "-m", "database_system.cli.main",
+                "--data", str(data_dir),
+            ],
+            cwd=REPO_ROOT,
+            input=script,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    def test_a_statement_spread_over_several_lines_runs(self):
+        """建表跨四行写，REPL 要攒齐再执行——这正是过去报 EOF 的场景。"""
+        with TemporaryDirectory() as directory:
+            result = self.run_repl(
+                Path(directory) / "db",
+                "CREATE TABLE student (\n"
+                "    id INT,\n"
+                "    name VARCHAR(8)\n"
+                ");\n"
+                "INSERT INTO student VALUES (1, 'Alice');\n"
+                "SELECT * FROM student;\n"
+                "exit;\n",
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertIn("OK", result.stdout)
+            self.assertIn("1 row(s) inserted", result.stdout)
+            self.assertIn("(1, 'Alice')", result.stdout)
+
+    def test_a_semicolon_inside_a_string_does_not_split_the_statement(self):
+        """值里带分号也要整条执行，不能在字符串中间断开。"""
+        with TemporaryDirectory() as directory:
+            result = self.run_repl(
+                Path(directory) / "db",
+                "CREATE TABLE t(id INT, name VARCHAR(8));\n"
+                "INSERT INTO t VALUES (1, 'a;b');\n"
+                "SELECT * FROM t;\n"
+                "exit;\n",
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("(1, 'a;b')", result.stdout)
 
 
 if __name__ == "__main__":
