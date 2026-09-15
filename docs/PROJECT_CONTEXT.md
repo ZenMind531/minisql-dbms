@@ -1,6 +1,6 @@
 # MiniSQL 项目上下文
 
-> 最后更新：2026-09-14
+> 最后更新：2026-09-15
 > 本文只记录当前事实。历史过程由 Git 追踪，不在此追加时间线。
 
 ## 1. 项目范围
@@ -13,6 +13,8 @@ MiniSQL 是使用 Python 3.11 标准库实现的教学型关系数据库，面�
 - `WHERE` 表达式与多列 `ORDER BY`；
 - 4KB slotted page、LRU/FIFO 缓冲池和磁盘持久化；
 - REPL、SQL 文件执行和 `--compile-only` 编译器演示。
+- Tkinter 轻量数据库管理器，支持对象浏览、SQL 控制台、结构化结果、建表/删表、
+  新增/删除行和查询计划查看。
 
 `DROP TABLE` 和 `LIMIT` 已端到端接通；`UPDATE` 已完成词法、AST、语法、语义和
 逻辑计划，尚未接通执行器。
@@ -139,11 +141,22 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
   数据/原始计划/优化后计划/JSON/消息标签页；
 - 提供新建表、删除表、浏览数据、新增行、修改行和删除行的图形化入口，所有写
   操作均生成 SQL 并通过正常编译执行链完成；
-- 采用 Controller、单后台工作线程和结构化执行结果，保持现有
-  `MiniDB.execute()` 兼容；
+- 采用 Controller、单后台工作线程和 GUI 自有的 `DatabaseService` 结构化结果，
+  保持现有 `MiniDB.execute()` 不变；
 - 设计见 `docs/superpowers/specs/2026-09-14-minisql-desktop-gui-design.md`；
-- 实现前先由成员 D 复核新增 `MiniDB.execute_detailed()` 集成接口，再按测试先行
-  编写实施计划。
+- 实施计划见 `docs/superpowers/plans/2026-09-15-minisql-desktop-gui.md`。
+
+### 桌面 GUI 实现状态
+
+- `database_system/gui/` 已实现结构化执行服务、SQL 生成器、单后台工作线程、
+  Controller、Tkinter 主窗口和建表/新增行对话框；
+- GUI 通过现有 Lexer→Parser→Semantic→Planner→Optimizer→Executor 流水线执行，
+  不直接修改 Catalog 或存储文件；
+- 支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`、`DROP TABLE`、`LIMIT` 和
+  SHOW/ORDER BY 的现有端到端能力；UPDATE 执行器未完成，因此修改行按钮禁用；
+- Windows 使用 `.\start_gui.ps1` 启动；
+- GUI 专项测试为 `12 passed`，完整回归为
+  `268 passed, 3 skipped, 171 subtests passed`。
 
 ## 8. 维护规则
 

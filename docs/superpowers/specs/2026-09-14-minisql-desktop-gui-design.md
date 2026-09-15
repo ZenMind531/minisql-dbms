@@ -94,9 +94,9 @@ Tkinter View
     ↓ GuiCommand
 GuiController
     ↓ WorkerRequest
-DatabaseWorker（唯一 MiniDB 所有者）
+DatabaseWorker（唯一 DatabaseService 所有者）
     ↓
-MiniDB.execute_detailed()
+DatabaseService.execute()
     ↓
 Lexer → Parser → Semantic → Planner → Optimizer → Executor
     ↓ ExecutionBatch
@@ -116,16 +116,16 @@ database_system/gui/
 └── worker.py       # 单工作线程、请求队列和响应队列
 ```
 
-GUI 不直接访问 Page、BufferPool、StorageEngine 或 Executor。它只通过新增的结构化
-执行入口访问 `MiniDB`，从而保持模块边界清晰。
+GUI 不直接访问 Page、BufferPool 或 StorageEngine。`DatabaseService` 复用现有
+MiniDB 持有的编译器与 Executor 对象并返回结构化结果，从而不修改冻结引擎接口。
 
 ## 5. 结构化执行接口
 
-现有 `MiniDB.execute(sql) -> str` 必须保留，CLI 行为不得改变。为 GUI 增加一个
-向后兼容的入口：
+现有 `MiniDB.execute(sql) -> str` 保持不变，CLI 行为不得改变。GUI 在自身模块中
+提供结构化适配入口：
 
 ```python
-MiniDB.execute_detailed(sql: str) -> ExecutionBatch
+DatabaseService.execute(sql: str) -> ExecutionBatch
 ```
 
 `ExecutionBatch` 包含按源码顺序排列的 `StatementResult`。每个结果至少包含：
@@ -146,8 +146,7 @@ MiniDB.execute_detailed(sql: str) -> ExecutionBatch
 使用表模式列名，`SHOW DATABASES` 和 `SHOW TABLES` 使用固定展示列名。不得通过
 解析 CLI 格式化字符串推断表格结构。
 
-该接口涉及成员 D 负责的 `MiniDB`，实现和合入前需要 D 复核。它是新增接口，
-不会修改冻结契约中已有方法的参数或返回值。
+该适配器位于 GUI 模块，不改变成员 D 负责的 `MiniDB` 公共接口，也不修改冻结契约。
 
 ## 6. 并发与生命周期
 
@@ -228,7 +227,7 @@ SELECT name FROM student WHERE 1 = 1 AND age > 10 + 8;
 ## 11. 职责与评审
 
 - 成员 A 负责 GUI 展示、控制器、计划展示和相应测试；
-- `MiniDB.execute_detailed()` 属于与成员 D 的最小集成点，必须由 D 复核；
+- `DatabaseService` 只适配现有流水线；若以后进入 `MiniDB` 公共接口，必须由 D 复核；
 - 不修改成员 B 负责的 Plan 节点或 Optimizer 规则；
 - 不修改成员 C 负责的页式存储和缓存算法；
 - 如结构化接口需要进入冻结契约，必须经过全组评审后再更新契约。
