@@ -1,5 +1,8 @@
 import os
 from pathlib import Path
+import subprocess
+
+import pytest
 
 from database_system.command_installer import install_launchers
 
@@ -29,3 +32,24 @@ def test_install_linux_launchers_are_executable(tmp_path: Path) -> None:
     if os.name != "nt":
         assert installed[0].stat().st_mode & 0o111
         assert installed[1].stat().st_mode & 0o111
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility test")
+def test_install_script_parses_in_windows_powershell_51() -> None:
+    script = Path(__file__).parents[1] / "install.ps1"
+    command = (
+        "$tokens=$null; $errors=$null; "
+        f"[System.Management.Automation.Language.Parser]::ParseFile('{script}', "
+        "[ref]$tokens, [ref]$errors) > $null; "
+        "if ($errors.Count) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }"
+    )
+
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stderr

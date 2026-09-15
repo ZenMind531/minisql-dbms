@@ -30,7 +30,7 @@ cd minisql-dbms
 install.cmd
 ```
 
-安装完成后重新打开终端，直接使用：
+`install.cmd` 会绕过脚本执行策略，并兼容 Windows PowerShell 5.1。安装完成后重新打开终端，直接使用：
 
 ```text
 minidb          # 启动 CLI
@@ -178,7 +178,7 @@ GUI 专项测试：
 .\.venv\Scripts\python.exe -m pytest tests/test_gui_app.py tests/test_gui_controller.py tests/test_gui_dialogs.py tests/test_gui_service.py tests/test_gui_sql_builder.py tests/test_gui_theme.py -q
 ```
 
-当前验证结果：GUI 专项 `20 passed`；完整回归 `296 passed, 3 skipped, 171 subtests passed`。缺少图形显示环境时，少量 Tkinter 测试可能被跳过。
+当前验证结果：GUI 专项 `20 passed`；完整回归 `296 passed, 4 skipped, 171 subtests passed`。缺少图形显示环境时，少量 Tkinter 测试可能被跳过。
 
 ## 数据与注意事项
 

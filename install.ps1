@@ -1,4 +1,4 @@
-# MiniSQL Windows 环境初始化（PowerShell）
+# MiniSQL Windows installer. Keep this file ASCII-only for Windows PowerShell 5.1.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -24,16 +24,16 @@ foreach ($candidate in @(
 }
 
 if ($null -eq $pythonCommand) {
-    throw "未找到 Python 3.11。请先从 https://www.python.org/downloads/ 安装 Python 3.11。"
+    throw "Python 3.11 was not found. Install it from https://www.python.org/downloads/"
 }
 
-Write-Host "==> 创建 Python 3.11 虚拟环境"
+Write-Host "==> Creating Python 3.11 virtual environment"
 & $pythonCommand @pythonPrefix -m venv .venv
 
-Write-Host "==> 安装 pytest"
+Write-Host "==> Installing pytest"
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip pytest
 
-Write-Host "==> 安装 minidb 和 minidatagrip 命令"
+Write-Host "==> Installing minidb and minidatagrip commands"
 $launcherDir = Join-Path $env:LOCALAPPDATA "MiniDataGrip\bin"
 & .\.venv\Scripts\python.exe -m database_system.command_installer `
     --project-root $PSScriptRoot --bin-dir $launcherDir --platform windows
@@ -46,8 +46,8 @@ if ($launcherDir -notin $pathEntries) {
 }
 
 Write-Host ""
-Write-Host "MiniDB 环境准备完成。重新打开终端后可直接使用："
-Write-Host "  minidb          # 命令行"
-Write-Host "  minidatagrip    # 桌面 GUI"
-Write-Host "完整测试："
+Write-Host "MiniDB installation completed. Open a new terminal, then run:"
+Write-Host "  minidb          # CLI"
+Write-Host "  minidatagrip    # desktop GUI"
+Write-Host "Run all tests with:"
 Write-Host "  .\.venv\Scripts\python.exe -m pytest tests -v"
