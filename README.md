@@ -1,187 +1,204 @@
-# MiniSQL 教学数据库系统
+# MiniDataGrip / MiniSQL 教学数据库
 
-MiniSQL 是一个使用 Python 3.11 和标准库实现的教学型关系数据库。当前 SQL
-子集支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`、`SHOW DATABASES`、
-`SHOW TABLES`，以及包含比较、`NOT`、`AND`、`OR` 和括号的 `WHERE` 表达式。
-SELECT 还支持多列 `ORDER BY`，每列可使用 `ASC` 或 `DESC`，默认升序。
+MiniDataGrip 是 MiniSQL 教学数据库的桌面管理工具。项目使用 Python 3.11 和标准库实现，从 SQL 词法、语法、语义分析和查询优化，一直到执行器、缓冲池、分页存储与磁盘持久化，适合数据库课程设计、课堂演示和源码学习。
 
-编译器前端还支持 `DROP TABLE`、`UPDATE` 和 `LIMIT`，目前已接通 Lexer、AST
-与 Parser。它们的 Semantic、Planner 和 Executor 尚未接入，因此暂时只能解析
-并查看 AST，不能作为 MiniDB 端到端功能使用；尤其 LIMIT 在 B 接入前可能被
-旧 Planner 忽略，不能用其执行结果判断限行是否生效。
+项目提供两种使用方式：
 
-## 快速开始
+- **MiniDataGrip GUI**：对象浏览器、多标签 SQL 控制台、数据编辑和查询计划查看；
+- **MiniDB CLI**：交互式执行 SQL、运行 SQL 文件和编译器演示。
 
-一条命令装好环境（自动建虚拟环境、装 pytest、生成 `minidb` 快捷命令）：
+## 已支持功能
 
-```bash
-git clone https://github.com/ZenMind531/minisql-dbms.git && cd minisql-dbms && ./install.sh
-```
+- SQL：`CREATE TABLE`、`DROP TABLE`、`INSERT`、`SELECT`、`UPDATE`、`DELETE`；
+- 查询：`WHERE`、`NOT`、`AND`、`OR`、括号、比较运算、多列 `ORDER BY`、`LIMIT`；
+- 元数据：`SHOW DATABASES`、`SHOW TABLES`；
+- 编译器：Token、AST、语义检查、逻辑计划、规则优化和错误定位；
+- 存储：4KB slotted page、LRU/FIFO 缓冲池、磁盘持久化和 Catalog 恢复；
+- GUI：建表、删表、浏览数据、增删改行、保存 SQL 和查看查询计划。
 
-装完在任意目录敲 `minidb` 进入交互式命令行，然后粘贴以下语句：
+当前定位是单用户、单进程的教学型数据库。`JOIN`、`GROUP BY`、事务、并发控制和索引不在当前实现范围内。
 
-```sql
-CREATE TABLE student(id INT, name VARCHAR(32), age INT);
-INSERT INTO student VALUES (1, 'Alice', 20);
-SELECT * FROM student WHERE age > 18;
-exit;
-```
+## 3 分钟快速开始
 
-数据文件存放在 `data/` 目录，退出时自动落盘。
+项目要求 **Python 3.11**。
 
-> **当前限制**：表结构的持久化（CatalogManager）尚未接通，因此重启后
-> 需要重新 `CREATE TABLE`；磁盘上的 `.dat` 数据文件本身是保留的。
-
-## 编译器前端
-
-编译器数据流如下：
-
-```text
-SQL 文本 → Lexer → Token 列表 → Parser → AST
-```
-
-- `database_system/sql_compiler/lexer.py`：识别 Token、跳过空白与注释，报告
-  带行列号的 `LexError`。
-- `database_system/sql_compiler/parser.py`：按照 `docs/grammar.md` 进行递归下降
-  解析，构造 AST，报告包含实际 Token 与 expected 集合的 `ParseError`。
-- `database_system/sql_compiler/ast_nodes.py`：语句、排序项和表达式 AST 接口。
-
-文法唯一准绳是 `docs/grammar.md`，AST 与 Parser 的设计说明见
-`docs/design.md`。
-
-## 安装与启动
-
-项目要求 Python 3.11。初始化脚本会在仓库内创建 `.venv` 并安装 pytest，
-不会把项目依赖安装到系统 Python。
-
-### Windows（PowerShell）
+### Windows
 
 ```powershell
+git clone https://github.com/ZenMind531/minisql-dbms.git
+cd minisql-dbms
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
+.\start_gui.ps1
+```
+
+启动命令行版本：
+
+```powershell
 .\start.ps1
 ```
 
 ### Linux
 
-Debian/Ubuntu 如果还没有 Python 3.11 和 venv，可先安装系统包：
+Ubuntu/Debian 使用 GUI 时需要安装 Tkinter：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y python3.11 python3.11-venv
+sudo apt-get install -y python3.11 python3.11-venv python3-tk
+git clone https://github.com/ZenMind531/minisql-dbms.git
+cd minisql-dbms
 bash install.sh
-bash start.sh
+./.venv/bin/python -m database_system.gui
 ```
 
-进入 `MiniDB>` 后，每条 SQL 必须以分号结束；输入 `exit;` 退出。
+命令行版本使用 `bash start.sh`。Linux GUI 需要桌面环境或已配置的 X11/Wayland；纯 SSH 终端可以使用 CLI，但不能直接显示 Tkinter 窗口。
 
-### 桌面 GUI
+## 使用 MiniDataGrip GUI
 
-Windows 可直接启动轻量数据库管理器：
+### 启动
 
 ```powershell
+# Windows
 .\start_gui.ps1
 ```
 
-GUI 提供对象浏览器、多标签 SQL 控制台、数据表格、建表/删表、新增/删除行，
-以及原始计划、优化后计划、JSON 和错误消息视图。双击对象树中的表可打开前
-200 行数据；`Ctrl+Enter` 执行当前 SQL 控制台。由于 UPDATE 执行器尚未接通，
-“修改行”按钮暂时禁用。
-
-常用查询示例：
-
-```sql
-SHOW DATABASES;
-SHOW TABLES;
-SELECT name FROM student ORDER BY age DESC, name ASC;
+```bash
+# Linux
+./.venv/bin/python -m database_system.gui
 ```
 
-前端扩展语法示例：
+默认数据保存在项目的 `data/` 目录。点击顶部“打开目录”可以切换数据库目录；关闭程序时会完成存储收尾和数据落盘。
+
+### 界面区域
+
+- **左侧对象浏览器**：查看表和字段，双击表可浏览前 200 行；
+- **上方 SQL 控制台**：支持多个标签页，按 `Ctrl+Enter` 执行当前 SQL；
+- **下方数据表格**：显示查询结果，提供新增、修改、删除和刷新操作；
+- **查询计划**：查看原始计划、优化后计划和 JSON 结构；
+- **消息**：查看执行结果、耗时、GUI 生成的 SQL 和错误位置。
+
+### 图形化管理数据
+
+1. 点击“新建表”，填写表名和字段；`VARCHAR` 长度必须在 1 到 255 之间。
+2. 双击对象浏览器中的表，打开表数据。
+3. 使用结果表上方按钮新增、修改或删除行。
+4. 删除表或修改、删除数据前，GUI 会展示将要执行的 SQL 并要求确认。
+
+当前系统没有主键约束。GUI 使用原始行的所有列生成 `WHERE` 条件，因此内容完全相同的多行可能被一起修改或删除，确认窗口会对此作出提醒。
+
+### SQL 控制台与保存
+
+点击“＋ SQL 控制台”创建标签页，输入 SQL 后点击“运行”或按 `Ctrl+Enter`。每个标签右侧都有关闭按钮；关闭包含内容的标签时，可以保存为本地 UTF-8 `.sql` 文件。
+
+可以直接尝试：
 
 ```sql
-DROP TABLE student;
-UPDATE student SET name = 'Alice', age = age + 1 WHERE id = 1;
+CREATE TABLE student(id INT, name VARCHAR(32), age INT);
+INSERT INTO student VALUES (1, 'Alice', 20);
+INSERT INTO student VALUES (2, 'Bob', 18);
+
 SELECT * FROM student ORDER BY age DESC LIMIT 10;
+UPDATE student SET age = age + 1 WHERE id = 1;
+DELETE FROM student WHERE id = 2;
+SHOW TABLES;
 ```
 
-## 启动模式
+多条语句可以一起执行，但每条语句都必须以分号结束。
 
-交互模式（数据默认保存在 `data/`）：
+### 查询计划
+
+- **原始计划**：Planner 根据语义检查后的 AST 生成的逻辑步骤；
+- **优化后计划**：Optimizer 完成常量折叠、布尔化简和冗余节点消除后的计划；
+- **JSON**：便于展示或程序读取的结构化优化后计划。
+
+## 使用 MiniDB CLI
+
+进入交互模式：
 
 ```powershell
-# Windows
-.\start.ps1
-
-# Linux
-bash start.sh
+.\start.ps1             # Windows
 ```
 
-执行 SQL 文件并选择数据目录：
-
-```powershell
-# Windows
-.\start.ps1 --file tests/sql/demo_compiler.sql --data .\tmp\minidb
-
-# Linux
-bash start.sh --file tests/sql/demo_compiler.sql --data ./tmp/minidb
+```bash
+bash start.sh           # Linux
 ```
 
-只运行编译器演示，不创建数据库文件：
+输入以分号结束的 SQL；语句可以跨行。输入 `exit;` 或 `quit;` 退出。
+
+执行 SQL 文件并指定数据目录：
 
 ```powershell
-# Windows
+.\start.ps1 --file tests/sql/demo_e2e.sql --data .\tmp\minidb
+```
+
+```bash
+bash start.sh --file tests/sql/demo_e2e.sql --data ./tmp/minidb
+```
+
+只运行编译器演示：
+
+```powershell
 .\start.ps1 --compile-only tests/sql/demo_compiler.sql
+```
 
-# Linux
+```bash
 bash start.sh --compile-only tests/sql/demo_compiler.sql
 ```
 
-查看全部参数：
+使用 `.\start.ps1 --help` 或 `bash start.sh --help` 查看全部参数。
 
-```powershell
-.\start.ps1 --help       # Windows
-bash start.sh --help     # Linux
+## 系统架构
+
+```text
+SQL → Lexer → Token → Parser → AST
+    → SemanticAnalyzer → Planner → Optimizer → Logical Plan
+    → Executor → StorageEngine → BufferPool / FileManager / Page
 ```
 
-## 运行编译器演示（底层 Python 命令）
+```text
+database_system/
+├─ sql_compiler/   # Lexer、Parser、AST、Semantic、Planner、Optimizer
+├─ engine/         # MiniDB、Executor、Catalog
+├─ storage/        # Page、FileManager、BufferPool、持久化
+├─ gui/            # MiniDataGrip 桌面程序
+└─ cli/            # 命令行入口
 
-从命令行传入 SQL：
-
-```powershell
-python -m database_system.sql_compiler.demo --compile-only --sql "CREATE TABLE student(id INT, name VARCHAR(32)); SELECT * FROM student;"
+tests/             # 单元、集成和端到端测试
+docs/              # 文法、设计、项目上下文和测试报告
+specs/             # 需求、计划、任务与接口契约
 ```
 
-或者读取 SQL 文件：
-
-```powershell
-python -m database_system.sql_compiler.demo --compile-only tests/sql/demo_compiler.sql
-```
-
-演示会依次输出 Token、AST、语义检查、原始 Logical Plan 和优化后的 Plan。
+`docs/grammar.md` 是 SQL 文法的唯一准绳，整体设计见 `docs/design.md`，当前实现状态见 `docs/PROJECT_CONTEXT.md`。
 
 ## 测试
 
-项目测试使用 pytest，同时保持与标准库 unittest 兼容：
-
 ```powershell
-# Windows
-.\.venv\Scripts\python.exe -m pytest tests -v
-
-# Linux
-./.venv/bin/python -m pytest tests -v
+# Windows：完整测试
+.\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-只运行组员 A 的测试：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_ast_nodes.py tests/test_lexer.py tests/test_parser.py tests/test_sql_cases.py -v
+```bash
+# Linux：完整测试
+./.venv/bin/python -m pytest tests -q
 ```
 
-编译器案例集合位于 `tests/sql/compiler_cases.json`，包含正常、词法错误、语法
-错误和语义错误输入。
+GUI 专项测试：
 
-## 当前范围
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_gui_app.py tests/test_gui_controller.py tests/test_gui_dialogs.py tests/test_gui_service.py tests/test_gui_sql_builder.py tests/test_gui_theme.py -q
+```
 
-系统面向单用户、单进程教学场景。目前只显示当前数据库，但 SHOW AST 和目录
-入口已为后续多数据库切换保留扩展空间。`DROP TABLE`、`UPDATE`、`LIMIT`
-当前仅属于编译器前端扩展；`JOIN`、`GROUP BY`、事务和索引不属于当前范围。
+当前验证结果：GUI 专项 `20 passed`；完整回归 `293 passed, 4 skipped, 171 subtests passed`。缺少图形显示环境时，少量 Tkinter 测试可能被跳过。
+
+## 数据与注意事项
+
+- 默认数据目录是 `data/`，也可通过 GUI 或 CLI 参数切换；
+- 表结构和数据都会持久化，重新启动后可继续查询；
+- `INT` 是 32 位有符号整数；
+- `VARCHAR(n)` 按 UTF-8 字节数校验，`1 <= n <= 255`；
+- SQL 关键字大小写不敏感，标识符和字符串内容保持原样；
+- 项目没有事务和并发控制，不要让多个进程同时写同一个数据目录。
+
+## 用途
+
+本项目用于数据库课程设计和教学演示。提交课程作业前，请确认学校对代码引用、协作开发和开源仓库的要求。
