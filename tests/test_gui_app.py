@@ -39,7 +39,8 @@ def test_gui_window_builds_with_injected_controller() -> None:
     root, app = build_app()
     try:
         root.update_idletasks()
-        assert root.title() == "MiniSQL Studio"
+        assert MiniSQLApp.APP_NAME == "MiniDataGrip"
+        assert root.title() == "MiniDataGrip"
         assert len(app.console_tabs.tabs()) == 1
         assert len(app.result_tabs.tabs()) == 5
         assert app.console_tabs.cget("style") == "Closable.TNotebook"

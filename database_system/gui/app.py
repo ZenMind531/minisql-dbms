@@ -18,6 +18,7 @@ from database_system.gui.theme import (
 
 
 class MiniSQLApp:
+    APP_NAME = "MiniDataGrip"
     UPDATE_SUPPORTED = True
 
     def __init__(self, root: tk.Tk, data_dir: str | Path = "data/",
@@ -38,13 +39,13 @@ class MiniSQLApp:
         self.controller.refresh_schema()
 
     def _build(self) -> None:
-        self.root.title("MiniSQL Studio")
+        self.root.title(self.APP_NAME)
         self.root.geometry("1240x800")
         self.root.minsize(960, 620)
         toolbar = ttk.Frame(self.root, style="Toolbar.TFrame", padding=(14, 10))
         toolbar.pack(fill="x")
-        ttk.Label(toolbar, text="MiniSQL", style="Title.TLabel").pack(side="left")
-        ttk.Label(toolbar, text="  STUDIO  /  LOCAL", style="Muted.TLabel").pack(side="left", padx=(0, 24))
+        ttk.Label(toolbar, text=self.APP_NAME, style="Title.TLabel").pack(side="left")
+        ttk.Label(toolbar, text="  /  LOCAL", style="Muted.TLabel").pack(side="left", padx=(0, 24))
         ttk.Button(toolbar, text="打开目录", command=self.open_directory).pack(side="left", padx=3)
         ttk.Button(toolbar, text="新建表", command=self.create_table).pack(side="left", padx=3)
         ttk.Button(toolbar, text="刷新", command=self.refresh_schema).pack(side="left", padx=3)
