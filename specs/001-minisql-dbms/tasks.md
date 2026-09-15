@@ -113,12 +113,15 @@ description: "Task list for MiniSQL 教学数据库系统 (4-person team)"
 
 - [x] T035 [P] 完善 `README.md`（构建/运行/演示命令）与 `docs/design.md`（AST/Catalog/Plan 结构说明）（A）
 - [ ] T036 [P] 整理测试报告：测试用例清单、运行结果截图/日志、失败案例分析（C）
+  ——全仓 259 条用例的分类清单已整理在 `docs/test-cases.md`（D 代做，C 可直接引用，
+  仍需补运行截图与失败案例分析）
 - [ ] T037 实习报告：关键设计决策、问题定位过程、AI 辅助使用说明、四人贡献说明（D 汇总，全员供稿）
 - [ ] T038 [P] 扩展项：ORDER BY、DROP TABLE、LIMIT 已端到端完成（后两者的
   Executor 由 D 接入，测试见 `tests/test_engine.py` 的 DROP TABLE / LIMIT 两节）；
-  UPDATE 的 Lexer/AST/Parser 与 Semantic/Plan 均已就位，Executor 待接入——卡在
-  `StorageEngine` 目前没有"改行"原语（只有 insert_row / scan / delete_where），
-  需 C 补 `update_where` 或另议方案；固定种子 Fuzz、Plan 可视化仍需单独验收（认领制）
+  UPDATE 的 Lexer/AST/Parser 与 Semantic/Plan 均已就位，Executor 待接入——改行
+  原语**页层已具备**（`database_system/storage/page.py` 的 `Page.update_row`，
+  `tests/test_storage.py` 3 条覆盖），缺的只是 `StorageEngine`（D）向上转发，
+  无需 C 另写原语；固定种子 Fuzz、Plan 可视化仍需单独验收（认领制）
 - [ ] T039 最终验收彩排：按 quickstart.md 全流程演示一遍，每人随机抽讲一个函数（全员）
 
 ---
