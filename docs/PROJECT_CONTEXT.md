@@ -157,8 +157,10 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
 - Windows 使用 `.\start_gui.ps1` 启动；
 - GUI 已统一为暗色 IDE 工作台视觉：分层深色表面、强调色运行按钮、紧凑对象树、
   无边框等宽 SQL 编辑器、斑马纹结果表和底部连接/执行状态栏；
-- GUI 专项测试为 `14 passed`，完整回归为
-  `270 passed, 3 skipped, 171 subtests passed`。
+- 每个 SQL 控制台标签带独立关闭叉号；允许关闭最后一个控制台。有内容的控制台
+  关闭前询问是否保存，确认后以 UTF-8 `.sql` 文件写入本地，取消则保留标签；
+- GUI 专项测试为 `17 passed`，完整回归为
+  `273 passed, 3 skipped, 171 subtests passed`。
 
 ## 8. 维护规则
 

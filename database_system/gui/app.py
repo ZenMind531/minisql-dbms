@@ -12,7 +12,9 @@ from database_system.gui.sql_builder import (
     build_browse_table, build_create_table, build_delete_row, build_drop_table,
     build_insert,
 )
-from database_system.gui.theme import DARK_PALETTE, configure_dark_theme, editor_options
+from database_system.gui.theme import (
+    DARK_PALETTE, configure_closable_notebook, configure_dark_theme, editor_options,
+)
 
 
 class MiniSQLApp:
@@ -26,7 +28,9 @@ class MiniSQLApp:
         self.current_table: str | None = None
         self.current_columns: tuple[str, ...] = ()
         self._editors: dict[str, tk.Text] = {}
-        configure_dark_theme(self.root)
+        self._console_serial = 0
+        style = configure_dark_theme(self.root)
+        self._close_images = configure_closable_notebook(style, self.root)
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(80, self._poll)
@@ -65,7 +69,8 @@ class MiniSQLApp:
         self.context_menu.add_command(label="打开数据", command=self.open_selected_table)
         self.context_menu.add_command(label="删除表", command=self.drop_selected_table)
 
-        self.console_tabs = ttk.Notebook(right)
+        self.console_tabs = ttk.Notebook(right, style="Closable.TNotebook")
+        self.console_tabs.bind("<ButtonRelease-1>", self._on_console_tab_click)
         self.result_tabs = ttk.Notebook(right)
         right.add(self.console_tabs, weight=2)
         right.add(self.result_tabs, weight=3)
@@ -104,19 +109,61 @@ class MiniSQLApp:
         return text
 
     def add_console(self) -> None:
+        self._console_serial += 1
         frame = ttk.Frame(self.console_tabs, style="Panel.TFrame", padding=1)
         editor = tk.Text(frame, wrap="none", undo=True, **editor_options())
         editor.pack(fill="both", expand=True)
-        self.console_tabs.add(frame, text=f"SQL {len(self.console_tabs.tabs()) + 1}")
+        self.console_tabs.add(frame, text=f"SQL {self._console_serial}  ")
         self._editors[str(frame)] = editor
         self.console_tabs.select(frame)
         editor.focus_set()
 
-    def _editor(self) -> tk.Text:
-        return self._editors[self.console_tabs.select()]
+    def _editor(self) -> tk.Text | None:
+        selected = self.console_tabs.select()
+        return self._editors.get(selected)
+
+    def _on_console_tab_click(self, event: tk.Event) -> None:
+        if self.console_tabs.identify(event.x, event.y) != "close":
+            return
+        try:
+            tab_id = self.console_tabs.tabs()[self.console_tabs.index(f"@{event.x},{event.y}")]
+        except (tk.TclError, IndexError):
+            return
+        self.close_console(tab_id)
+
+    def close_console(self, tab_id: str | None = None) -> bool:
+        target = tab_id or self.console_tabs.select()
+        editor = self._editors.get(target)
+        if editor is None:
+            return False
+        sql = editor.get("1.0", "end-1c")
+        if sql.strip():
+            save = messagebox.askyesnocancel(
+                "关闭 SQL 控制台", "关闭前是否保存这段 SQL？", parent=self.root)
+            if save is None:
+                return False
+            if save:
+                path = filedialog.asksaveasfilename(
+                    parent=self.root, title="保存 SQL", defaultextension=".sql",
+                    filetypes=(("SQL 文件", "*.sql"), ("所有文件", "*.*")))
+                if not path:
+                    return False
+                try:
+                    Path(path).write_text(sql, encoding="utf-8")
+                except OSError as exc:
+                    messagebox.showerror("保存失败", str(exc), parent=self.root)
+                    return False
+        self._editors.pop(target)
+        frame = self.console_tabs.nametowidget(target)
+        self.console_tabs.forget(target)
+        frame.destroy()
+        return True
 
     def execute_sql(self, sql: str | None = None) -> None:
-        statement = sql if sql is not None else self._editor().get("1.0", "end").strip()
+        editor = self._editor()
+        if sql is None and editor is None:
+            return
+        statement = sql if sql is not None else editor.get("1.0", "end").strip()
         if not statement:
             return
         if self.controller.execute(statement):
@@ -239,6 +286,8 @@ class MiniSQLApp:
             self.result_tabs.select(self.messages)
             if error.line and error.column:
                 editor = self._editor()
+                if editor is None:
+                    return
                 index = f"{error.line}.{error.column - 1}"
                 editor.tag_remove("sql_error", "1.0", "end")
                 editor.tag_configure("sql_error", background=DARK_PALETTE["error"])

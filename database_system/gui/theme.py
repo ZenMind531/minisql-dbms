@@ -89,3 +89,30 @@ def configure_dark_theme(root: tk.Misc) -> ttk.Style:
     style.configure("Vertical.TScrollbar", background=palette["elevated"],
                     troughcolor=palette["editor"], arrowcolor=palette["muted"], borderwidth=0)
     return style
+
+
+def configure_closable_notebook(style: ttk.Style, root: tk.Misc) -> tuple[tk.PhotoImage, tk.PhotoImage]:
+    normal = tk.PhotoImage(master=root, width=12, height=12)
+    active = tk.PhotoImage(master=root, width=12, height=12)
+    for image, color in ((normal, DARK_PALETTE["muted"]),
+                         (active, DARK_PALETTE["text"])):
+        for offset in range(3, 9):
+            image.put(color, (offset, offset))
+            image.put(color, (11 - offset, offset))
+    style.element_create("close", "image", normal, ("active", active), border=4, sticky="")
+    style.layout("Closable.TNotebook", style.layout("TNotebook"))
+    style.layout("Closable.TNotebook.Tab", [
+        ("Notebook.tab", {"sticky": "nswe", "children": [
+            ("Notebook.padding", {"side": "top", "sticky": "nswe", "children": [
+                ("Notebook.label", {"side": "left", "sticky": ""}),
+                ("close", {"side": "left", "sticky": "", "expand": False}),
+            ]}),
+        ]}),
+    ])
+    style.configure("Closable.TNotebook", background=DARK_PALETTE["window"], borderwidth=0)
+    style.configure("Closable.TNotebook.Tab", background=DARK_PALETTE["panel"],
+                    foreground=DARK_PALETTE["muted"], borderwidth=0, padding=(15, 8))
+    style.map("Closable.TNotebook.Tab", background=[("selected", DARK_PALETTE["elevated"])],
+              foreground=[("selected", DARK_PALETTE["text"]),
+                          ("active", DARK_PALETTE["text"])])
+    return normal, active
