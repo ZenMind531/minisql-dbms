@@ -12,6 +12,7 @@ from database_system.gui.sql_builder import (
     build_browse_table, build_create_table, build_delete_row, build_drop_table,
     build_insert,
 )
+from database_system.gui.theme import DARK_PALETTE, configure_dark_theme, editor_options
 
 
 class MiniSQLApp:
@@ -24,6 +25,8 @@ class MiniSQLApp:
         self.tables: dict[str, TableInfo] = {}
         self.current_table: str | None = None
         self.current_columns: tuple[str, ...] = ()
+        self._editors: dict[str, tk.Text] = {}
+        configure_dark_theme(self.root)
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(80, self._poll)
@@ -31,26 +34,29 @@ class MiniSQLApp:
 
     def _build(self) -> None:
         self.root.title("MiniSQL Studio")
-        self.root.geometry("1180x760")
-        toolbar = ttk.Frame(self.root, padding=6)
+        self.root.geometry("1240x800")
+        self.root.minsize(960, 620)
+        toolbar = ttk.Frame(self.root, style="Toolbar.TFrame", padding=(14, 10))
         toolbar.pack(fill="x")
-        ttk.Button(toolbar, text="打开数据目录", command=self.open_directory).pack(side="left", padx=3)
+        ttk.Label(toolbar, text="MiniSQL", style="Title.TLabel").pack(side="left")
+        ttk.Label(toolbar, text="  STUDIO  /  LOCAL", style="Muted.TLabel").pack(side="left", padx=(0, 24))
+        ttk.Button(toolbar, text="打开目录", command=self.open_directory).pack(side="left", padx=3)
         ttk.Button(toolbar, text="新建表", command=self.create_table).pack(side="left", padx=3)
         ttk.Button(toolbar, text="刷新", command=self.refresh_schema).pack(side="left", padx=3)
-        self.run_button = ttk.Button(toolbar, text="▶ 执行 SQL", command=self.execute_sql)
-        self.run_button.pack(side="left", padx=12)
-        ttk.Button(toolbar, text="新建控制台", command=self.add_console).pack(side="left", padx=3)
+        self.run_button = ttk.Button(toolbar, text="▶ 运行", command=self.execute_sql,
+                                     style="Accent.TButton")
+        self.run_button.pack(side="left", padx=(14, 3))
+        ttk.Button(toolbar, text="＋ SQL 控制台", command=self.add_console).pack(side="left", padx=3)
         self.status = tk.StringVar(value="就绪")
-        ttk.Label(toolbar, textvariable=self.status).pack(side="right", padx=8)
 
         main = ttk.Panedwindow(self.root, orient="horizontal")
-        main.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-        left = ttk.Frame(main, padding=4)
+        main.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+        left = ttk.Frame(main, style="Panel.TFrame", padding=(10, 10))
         right = ttk.Panedwindow(main, orient="vertical")
         main.add(left, weight=1)
-        main.add(right, weight=4)
+        main.add(right, weight=5)
 
-        ttk.Label(left, text="对象浏览器").pack(anchor="w", pady=(0, 4))
+        ttk.Label(left, text="DATABASE EXPLORER", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
         self.schema_tree = ttk.Treeview(left, show="tree")
         self.schema_tree.pack(fill="both", expand=True)
         self.schema_tree.bind("<Double-1>", lambda _e: self.open_selected_table())
@@ -65,15 +71,16 @@ class MiniSQLApp:
         right.add(self.result_tabs, weight=3)
         self.add_console()
 
-        data_frame = ttk.Frame(self.result_tabs)
-        data_toolbar = ttk.Frame(data_frame, padding=4)
+        data_frame = ttk.Frame(self.result_tabs, style="Panel.TFrame")
+        data_toolbar = ttk.Frame(data_frame, style="Toolbar.TFrame", padding=(8, 7))
         data_toolbar.pack(fill="x")
         ttk.Button(data_toolbar, text="新增行", command=self.insert_row).pack(side="left", padx=3)
         update_state = "normal" if self.UPDATE_SUPPORTED else "disabled"
         update_text = "修改行" if self.UPDATE_SUPPORTED else "修改行（执行器未支持）"
         self.update_button = ttk.Button(data_toolbar, text=update_text, state=update_state)
         self.update_button.pack(side="left", padx=3)
-        ttk.Button(data_toolbar, text="删除选中行", command=self.delete_row).pack(side="left", padx=3)
+        ttk.Button(data_toolbar, text="删除选中行", command=self.delete_row,
+                   style="Danger.TButton").pack(side="left", padx=3)
         ttk.Button(data_toolbar, text="刷新数据", command=self.refresh_data).pack(side="left", padx=3)
         self.data_grid = ttk.Treeview(data_frame, show="headings", selectmode="browse")
         yscroll = ttk.Scrollbar(data_frame, orient="vertical", command=self.data_grid.yview)
@@ -85,24 +92,28 @@ class MiniSQLApp:
         self.optimized_plan = self._text_tab("优化后计划")
         self.plan_json = self._text_tab("JSON")
         self.messages = self._text_tab("消息")
+        status_bar = ttk.Frame(self.root, style="Toolbar.TFrame")
+        status_bar.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Label(status_bar, text="● LOCAL", style="Status.TLabel").pack(side="left")
+        ttk.Label(status_bar, textvariable=self.status, style="Status.TLabel").pack(side="right")
         self.root.bind("<Control-Return>", lambda _e: self.execute_sql())
 
     def _text_tab(self, title: str) -> tk.Text:
-        text = tk.Text(self.result_tabs, wrap="none", font=("Consolas", 10))
+        text = tk.Text(self.result_tabs, wrap="none", **editor_options())
         self.result_tabs.add(text, text=title)
         return text
 
     def add_console(self) -> None:
-        frame = ttk.Frame(self.console_tabs)
-        editor = tk.Text(frame, wrap="none", undo=True, font=("Consolas", 11))
+        frame = ttk.Frame(self.console_tabs, style="Panel.TFrame", padding=1)
+        editor = tk.Text(frame, wrap="none", undo=True, **editor_options())
         editor.pack(fill="both", expand=True)
         self.console_tabs.add(frame, text=f"SQL {len(self.console_tabs.tabs()) + 1}")
+        self._editors[str(frame)] = editor
         self.console_tabs.select(frame)
         editor.focus_set()
 
     def _editor(self) -> tk.Text:
-        selected = self.console_tabs.nametowidget(self.console_tabs.select())
-        return next(child for child in selected.winfo_children() if isinstance(child, tk.Text))
+        return self._editors[self.console_tabs.select()]
 
     def execute_sql(self, sql: str | None = None) -> None:
         statement = sql if sql is not None else self._editor().get("1.0", "end").strip()
@@ -230,7 +241,7 @@ class MiniSQLApp:
                 editor = self._editor()
                 index = f"{error.line}.{error.column - 1}"
                 editor.tag_remove("sql_error", "1.0", "end")
-                editor.tag_configure("sql_error", background="#ffd6d6")
+                editor.tag_configure("sql_error", background=DARK_PALETTE["error"])
                 editor.tag_add("sql_error", index, f"{index}+1c")
                 editor.see(index)
 
@@ -241,8 +252,10 @@ class MiniSQLApp:
         for column in columns:
             self.data_grid.heading(column, text=column)
             self.data_grid.column(column, width=140, anchor="w")
-        for row in rows:
-            self.data_grid.insert("", "end", values=row)
+        self.data_grid.tag_configure("even", background=DARK_PALETTE["panel"])
+        self.data_grid.tag_configure("odd", background=DARK_PALETTE["row_alt"])
+        for index, row in enumerate(rows):
+            self.data_grid.insert("", "end", values=row, tags=("even" if index % 2 == 0 else "odd",))
         if columns:
             self.result_tabs.select(0)
 

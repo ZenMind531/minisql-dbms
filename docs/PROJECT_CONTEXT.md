@@ -155,8 +155,10 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
 - 支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`、`DROP TABLE`、`LIMIT` 和
   SHOW/ORDER BY 的现有端到端能力；UPDATE 执行器未完成，因此修改行按钮禁用；
 - Windows 使用 `.\start_gui.ps1` 启动；
-- GUI 专项测试为 `12 passed`，完整回归为
-  `268 passed, 3 skipped, 171 subtests passed`。
+- GUI 已统一为暗色 IDE 工作台视觉：分层深色表面、强调色运行按钮、紧凑对象树、
+  无边框等宽 SQL 编辑器、斑马纹结果表和底部连接/执行状态栏；
+- GUI 专项测试为 `14 passed`，完整回归为
+  `270 passed, 3 skipped, 171 subtests passed`。
 
 ## 8. 维护规则
 

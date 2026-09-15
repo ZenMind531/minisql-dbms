@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from database_system.gui.models import ColumnInfo
+from database_system.gui.theme import DARK_PALETTE
 
 
 def coerce_value(text: str, type_text: str):
@@ -19,6 +20,7 @@ class CreateTableDialog(tk.Toplevel):
     def __init__(self, parent: tk.Misc) -> None:
         super().__init__(parent)
         self.title("新建表")
+        self.configure(background=DARK_PALETTE["window"])
         self.resizable(False, False)
         self.result: tuple[str, list[tuple[str, str]]] | None = None
         self.table_name = ttk.Entry(self, width=32)
@@ -29,7 +31,8 @@ class CreateTableDialog(tk.Toplevel):
         self._entries: list[tuple[ttk.Entry, ttk.Combobox, ttk.Entry]] = []
         self._add_column()
         ttk.Button(self, text="添加字段", command=self._add_column).grid(row=2, column=0, padx=10, pady=10)
-        ttk.Button(self, text="创建", command=self._accept).grid(row=2, column=1, padx=10, pady=10)
+        ttk.Button(self, text="创建", command=self._accept,
+                   style="Accent.TButton").grid(row=2, column=1, padx=10, pady=10)
         ttk.Button(self, text="取消", command=self.destroy).grid(row=2, column=2, padx=10, pady=10)
         self.transient(parent)
         self.grab_set()
@@ -74,6 +77,7 @@ class RowDialog(tk.Toplevel):
     def __init__(self, parent: tk.Misc, columns: tuple[ColumnInfo, ...]) -> None:
         super().__init__(parent)
         self.title("新增行")
+        self.configure(background=DARK_PALETTE["window"])
         self.resizable(False, False)
         self.result: list[object] | None = None
         self._entries: list[tuple[ColumnInfo, ttk.Entry]] = []
@@ -85,7 +89,8 @@ class RowDialog(tk.Toplevel):
             self._entries.append((column, entry))
         buttons = ttk.Frame(self)
         buttons.grid(row=len(columns), column=0, columnspan=2, pady=10)
-        ttk.Button(buttons, text="插入", command=self._accept).pack(side="left", padx=5)
+        ttk.Button(buttons, text="插入", command=self._accept,
+                   style="Accent.TButton").pack(side="left", padx=5)
         ttk.Button(buttons, text="取消", command=self.destroy).pack(side="left", padx=5)
         self.transient(parent)
         self.grab_set()
@@ -98,4 +103,3 @@ class RowDialog(tk.Toplevel):
             messagebox.showerror("输入错误", str(exc), parent=self)
             return
         self.destroy()
-
