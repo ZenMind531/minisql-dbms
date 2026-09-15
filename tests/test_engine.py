@@ -1,4 +1,5 @@
 import struct
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -485,25 +486,31 @@ def test_executor_two_argument_constructor_remains_supported(tmp_path: Path) -> 
 # 语义层只管类型、不管取值范围与行宽，引擎层是最后一道防线。
 
 
-def test_unimplemented_plan_reports_exec_error_instead_of_crashing(
+@dataclass(slots=True)
+class _UnknownPlan:
+    """执行器不认识的计划节点，用来测 dispatch 的兜底分支。"""
+
+
+def test_unknown_plan_reports_exec_error_instead_of_crashing(
     tmp_path: Path,
 ) -> None:
-    """前端解析得出来、执行器还没有分支的节点，必须干净报错。
+    """执行器遇到不认识的节点，必须干净报错而不是崩掉整个 REPL。
 
     过去这类节点掉进 execute() 的默认分支 _select()，_base_table() 访问
     plan.child 时抛 AttributeError —— 不是 MiniSQLError，CLI 不接，
     整个 REPL 带 traceback 退出。
 
-    UPDATE 正是下一个这样的节点：语义层已经放行，执行器还没实现。
-    DROP TABLE 也当过一阵子哨兵，现在它自己已经实现了。
+    这里用自造的节点，而不是等某个真节点"恰好还没实现"：UPDATE 和
+    DROP TABLE 都当过哨兵，各自实现之后哨兵就失效了。兜底是个契约，
+    不该依赖"哪个功能没做"来验证。
     """
     db = MiniDB(str(tmp_path))
     try:
         db.execute("CREATE TABLE student(id INT);")
         db.execute("INSERT INTO student VALUES (1);")
 
-        with pytest.raises(ExecError, match="Update"):
-            db.execute("UPDATE student SET id = 2;")
+        with pytest.raises(ExecError, match="_UnknownPlan"):
+            db.executor.execute(_UnknownPlan())
 
         assert db.execute("SELECT * FROM student;") == "(1,)"  # 数据没被动
     finally:
@@ -703,5 +710,113 @@ def test_insert_reordered_columns_works_across_types(tmp_path: Path) -> None:
         db.execute("INSERT INTO student(name, age, id) VALUES ('Alice', 20, 1);")
 
         assert db.execute("SELECT * FROM student;") == "(1, 'Alice', 20)"
+    finally:
+        db.close()
+
+
+# ---------- UPDATE ----------
+# 走 StorageEngine.update_where：整页先收集再落盘。行是定长的，所以
+# Page.update_row 一定走原地覆盖，槽号不变、多行改写不会互相挪位。
+
+
+def test_update_changes_only_matching_rows(tmp_path: Path) -> None:
+    """WHERE 圈定范围：只有满足条件的行被改写。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE student(id INT, name VARCHAR(32), age INT);")
+        db.execute("INSERT INTO student VALUES (1, 'Alice', 20);")
+        db.execute("INSERT INTO student VALUES (2, 'Bob', 17);")
+        db.execute("INSERT INTO student VALUES (3, 'Tom', 22);")
+
+        updated = db.execute("UPDATE student SET age = age + 1 WHERE age >= 20;")
+
+        assert updated == "2 row(s) updated"
+        assert db.execute("SELECT * FROM student;") == (
+            "(1, 'Alice', 21)\n(2, 'Bob', 17)\n(3, 'Tom', 23)"
+        )
+    finally:
+        db.close()
+
+
+def test_update_without_where_rewrites_every_row(tmp_path: Path) -> None:
+    """没有 WHERE 就是全表改写——与 DELETE 的语义对称。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(id INT);")
+        db.execute("INSERT INTO t VALUES (1);")
+        db.execute("INSERT INTO t VALUES (2);")
+
+        assert db.execute("UPDATE t SET id = 9;") == "2 row(s) updated"
+        assert db.execute("SELECT * FROM t;") == "(9,)\n(9,)"
+    finally:
+        db.close()
+
+
+def test_update_with_no_matching_row_reports_zero(tmp_path: Path) -> None:
+    """一条都没匹配就如实报 0，不能含糊地报成功。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(id INT);")
+        db.execute("INSERT INTO t VALUES (1);")
+
+        assert db.execute("UPDATE t SET id = 2 WHERE id = 999;") == "0 row(s) updated"
+        assert db.execute("SELECT * FROM t;") == "(1,)"
+    finally:
+        db.close()
+
+
+def test_update_evaluates_every_assignment_against_the_original_row(
+    tmp_path: Path,
+) -> None:
+    """SET a = b, b = a 要能交换两列。
+
+    若边改边取新值，第一条赋值就把 a 覆盖掉了，第二条读到的 a 已是新值，
+    结果两列都变成原来的 b —— 交换静默失败，且两列同类型、没有任何
+    类型检查会发现。
+    """
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(a INT, b INT);")
+        db.execute("INSERT INTO t VALUES (1, 2);")
+
+        db.execute("UPDATE t SET a = b, b = a;")
+
+        assert db.execute("SELECT * FROM t;") == "(2, 1)"
+    finally:
+        db.close()
+
+
+def test_update_that_overflows_int_leaves_the_row_untouched(tmp_path: Path) -> None:
+    """越界的赋值整条拒绝，页上不许留下一半改动。
+
+    encode_row 的取值域检查发生在收集阶段、落盘之前——这正是先收集再
+    落盘的理由：半路抛异常时，页还是干净的。
+    """
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(a INT, b INT);")
+        db.execute("INSERT INTO t VALUES (1, 2);")
+
+        with pytest.raises(StorageError, match="超出 INT 范围"):
+            db.execute("UPDATE t SET a = 4000000000;")
+
+        assert db.execute("SELECT * FROM t;") == "(1, 2)"  # 一行都没动
+    finally:
+        db.close()
+
+
+def test_updated_rows_survive_a_restart(tmp_path: Path) -> None:
+    """改完关掉重开，改后的值要在（脏页确实落盘了）。"""
+    db = MiniDB(str(tmp_path))
+    try:
+        db.execute("CREATE TABLE t(id INT, name VARCHAR(32));")
+        db.execute("INSERT INTO t VALUES (1, 'old');")
+        db.execute("UPDATE t SET name = 'new' WHERE id = 1;")
+    finally:
+        db.close()
+
+    db = MiniDB(str(tmp_path))
+    try:
+        assert db.execute("SELECT * FROM t;") == "(1, 'new')"
     finally:
         db.close()

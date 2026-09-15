@@ -1,11 +1,14 @@
 """Executor：把 Logical Plan 跑成结果（T031）。
 
-四种计划各有出口：
+各计划节点的出口：
 
-    CreateTable            → "OK"
-    Insert                 → "N row(s) inserted"
-    Delete                 → "N row(s) deleted"
-    Project/Filter/SeqScan → list[tuple]（已过滤、已投影）
+    CreateTable / DropTable   → "OK"
+    Insert                    → "N row(s) inserted"
+    Update                    → "N row(s) updated"
+    Delete                    → "N row(s) deleted"
+    ShowDatabases / ShowTables→ list[tuple]
+    Project/Filter/Sort/Limit
+    /SeqScan                  → list[tuple]（已过滤、排序、截断）
 
 表达式求值集中在 ``_evaluate``：行 + 表达式 → 值。它只认 tuple 和 AST，
 不碰页、不碰字节——那些活在 StorageEngine 那一层。
@@ -25,7 +28,7 @@ from database_system.sql_compiler.ast_nodes import (
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import (
     CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode, Project,
-    SeqScan, ShowDatabases, ShowTables, Sort,
+    SeqScan, ShowDatabases, ShowTables, Sort, Update,
 )
 from database_system.utils.errors import ExecError
 
@@ -142,15 +145,17 @@ class Executor:
             return self._delete(plan)
         if isinstance(plan, DropTable):
             return self._drop_table(plan)
+        if isinstance(plan, Update):
+            return self._update(plan)
         if isinstance(plan, ShowDatabases):
             return [(self.engine.data_dir.name or str(self.engine.data_dir),)]
         if isinstance(plan, ShowTables):
             return [(name,) for name in self.catalog.table_names(include_system=False)]
         if isinstance(plan, (SeqScan, Filter, Project, Sort, Limit)):
             return self._select(plan)
-        # 前端解析得出来、执行器还没实现的节点（Update 等）。
-        # 不能默认丢给 _select：那里要顺着 child 找 SeqScan，而这些节点
-        # 根本没有 child，抛出的 AttributeError 会穿透 CLI 崩掉整个 REPL。
+        # 兜底：前端若新增了计划节点而这里还没接，必须干净报错而不是崩掉
+        # REPL。不能默认丢给 _select：那里要顺着 child 找 SeqScan，而这类
+        # 新节点未必有 child，AttributeError 会穿透 CLI。
         raise ExecError(f"不支持的查询计划: {type(plan).__name__}")
 
     # ---------- 四种计划 ----------
@@ -186,6 +191,26 @@ class Executor:
         index = _column_index(schema)
         deleted = self.engine.delete_where(plan.table, self._predicate(plan.child, index))
         return f"{deleted} row(s) deleted"
+
+    def _update(self, plan: Update) -> str:
+        schema = self._require_table(plan.table)
+        index = _column_index(schema)
+        # 赋值目标先翻成行内下标，免得每一行都查一次字典
+        targets = [(index[item.column_name], item.value)
+                   for item in plan.assignments]
+
+        def transform(row: tuple) -> tuple:
+            # 右边一律拿原行求值：SET a = b, b = a 要能交换，
+            # 边改边取就成了"两次都读到刚改过的那一列"
+            values = list(row)
+            for position, expression in targets:
+                values[position] = _evaluate(expression, row, index)
+            return tuple(values)
+
+        updated = self.engine.update_where(
+            plan.table, self._predicate(plan.child, index), transform
+        )
+        return f"{updated} row(s) updated"
 
     def _drop_table(self, plan: DropTable) -> str:
         # 与 _create_table 对称：没有 CatalogManager 时（两参数构造器）
@@ -233,10 +258,12 @@ class Executor:
 
     # ---------- 工具 ----------
     @staticmethod
-    def _predicate(child: PlanNode, index: dict[str, int]) -> Callable[[tuple], bool]:
+    def _predicate(child: PlanNode | None,
+                   index: dict[str, int]) -> Callable[[tuple], bool]:
         if isinstance(child, Filter):
             return lambda row: bool(_evaluate(child.predicate, row, index))
-        return lambda row: True  # 没有 WHERE → 全表删除
+        # 没有 WHERE：DELETE 是删全表，UPDATE 是改全表
+        return lambda row: True
 
     def _require_table(self, table: str) -> TableSchema:
         schema = self.catalog.find_table(table)

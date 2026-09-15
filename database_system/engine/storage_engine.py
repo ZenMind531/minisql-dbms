@@ -208,6 +208,37 @@ class StorageEngine:
             deleted += len(victims)
         return deleted
 
+    def update_where(self, table: str, pred: Callable[[tuple], bool],
+                     transform: Callable[[tuple], tuple]) -> int:
+        """把满足 pred 的行按 transform 改写，返回改动的行数。
+
+        先整页收集、再统一落盘，而不是边遍历边改：encode_row 会做取值域
+        兜底（见模块头），它可能半路抛 StorageError——放在收集阶段抛，
+        一行都还没动，页还是干净的。
+
+        行是定长的，所以 Page.update_row 一定走原地覆盖那条路：槽号不变、
+        页内布局不变，多行改写不会互相挪位。
+        """
+        schema = self._schema(table)
+        manager, pool = self._open(table)
+        updated = 0
+        for page_id in range(FIRST_DATA_PAGE, manager.page_count()):
+            page = pool.get_page(page_id)
+            changes = []
+            for slot, data in page.rows():
+                row = decode_row(data, schema.columns)
+                if pred(row):
+                    new_data = encode_row(transform(row), schema.columns)
+                    changes.append((slot, new_data))
+            for slot, new_data in changes:
+                # 定长行不会返回 None。真返回了说明行宽变了，而 update_row
+                # 此时已经把旧行删掉——当成功放过就是静默丢数据。
+                if page.update_row(slot, new_data) is None:
+                    raise StorageError(f"表 '{table}' 改写行失败：页内空间不足")
+            pool.unpin_page(page_id, dirty=bool(changes))
+            updated += len(changes)
+        return updated
+
     def flush(self) -> None:
         for _, pool in self._open_tables.values():
             pool.flush_all()
