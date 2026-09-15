@@ -74,9 +74,11 @@ class CreateTableDialog(tk.Toplevel):
 
 
 class RowDialog(tk.Toplevel):
-    def __init__(self, parent: tk.Misc, columns: tuple[ColumnInfo, ...]) -> None:
+    def __init__(self, parent: tk.Misc, columns: tuple[ColumnInfo, ...],
+                 initial_values: tuple[object, ...] | None = None,
+                 title: str = "新增行", action_text: str = "插入") -> None:
         super().__init__(parent)
-        self.title("新增行")
+        self.title(title)
         self.configure(background=DARK_PALETTE["window"])
         self.resizable(False, False)
         self.result: list[object] | None = None
@@ -86,10 +88,12 @@ class RowDialog(tk.Toplevel):
                 row=row, column=0, padx=10, pady=6, sticky="w")
             entry = ttk.Entry(self, width=34)
             entry.grid(row=row, column=1, padx=10, pady=6)
+            if initial_values is not None:
+                entry.insert(0, str(initial_values[row]))
             self._entries.append((column, entry))
         buttons = ttk.Frame(self)
         buttons.grid(row=len(columns), column=0, columnspan=2, pady=10)
-        ttk.Button(buttons, text="插入", command=self._accept,
+        ttk.Button(buttons, text=action_text, command=self._accept,
                    style="Accent.TButton").pack(side="left", padx=5)
         ttk.Button(buttons, text="取消", command=self.destroy).pack(side="left", padx=5)
         self.transient(parent)

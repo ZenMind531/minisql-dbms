@@ -6,6 +6,7 @@ from database_system.gui.sql_builder import (
     build_delete_row,
     build_drop_table,
     build_insert,
+    build_update,
     literal_sql,
 )
 
@@ -25,6 +26,13 @@ def test_build_insert_and_delete_escape_strings() -> None:
         "DELETE FROM student WHERE id = 1 AND name = 'O''Brien';"
     )
     assert literal_sql(True) == "TRUE"
+
+
+def test_build_update_uses_new_values_and_old_row_as_predicate() -> None:
+    assert build_update("student", ["id", "name"], [2, "O'Brien"], [1, "Alice"]) == (
+        "UPDATE student SET id = 2, name = 'O''Brien' "
+        "WHERE id = 1 AND name = 'Alice';"
+    )
 
 
 def test_drop_rejects_invalid_identifier() -> None:

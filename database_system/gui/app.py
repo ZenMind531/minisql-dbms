@@ -10,7 +10,7 @@ from database_system.gui.dialogs import CreateTableDialog, RowDialog
 from database_system.gui.models import ExecutionBatch, TableInfo
 from database_system.gui.sql_builder import (
     build_browse_table, build_create_table, build_delete_row, build_drop_table,
-    build_insert,
+    build_insert, build_update,
 )
 from database_system.gui.theme import (
     DARK_PALETTE, configure_closable_notebook, configure_dark_theme, editor_options,
@@ -18,7 +18,7 @@ from database_system.gui.theme import (
 
 
 class MiniSQLApp:
-    UPDATE_SUPPORTED = False
+    UPDATE_SUPPORTED = True
 
     def __init__(self, root: tk.Tk, data_dir: str | Path = "data/",
                  controller: GuiController | None = None) -> None:
@@ -29,6 +29,7 @@ class MiniSQLApp:
         self.current_columns: tuple[str, ...] = ()
         self._editors: dict[str, tk.Text] = {}
         self._console_serial = 0
+        self._refresh_table_after_write: str | None = None
         style = configure_dark_theme(self.root)
         self._close_images = configure_closable_notebook(style, self.root)
         self._build()
@@ -82,7 +83,8 @@ class MiniSQLApp:
         ttk.Button(data_toolbar, text="新增行", command=self.insert_row).pack(side="left", padx=3)
         update_state = "normal" if self.UPDATE_SUPPORTED else "disabled"
         update_text = "修改行" if self.UPDATE_SUPPORTED else "修改行（执行器未支持）"
-        self.update_button = ttk.Button(data_toolbar, text=update_text, state=update_state)
+        self.update_button = ttk.Button(data_toolbar, text=update_text, state=update_state,
+                                        command=self.update_row)
         self.update_button.pack(side="left", padx=3)
         ttk.Button(data_toolbar, text="删除选中行", command=self.delete_row,
                    style="Danger.TButton").pack(side="left", padx=3)
@@ -244,6 +246,34 @@ class MiniSQLApp:
             self._log_generated(sql)
             self.execute_sql(sql)
 
+    def update_row(self) -> None:
+        selected = self.data_grid.selection()
+        if not selected or not self.current_table:
+            messagebox.showinfo("请选择行", "请先选择要修改的数据行。", parent=self.root)
+            return
+        info = self.tables[self.current_table]
+        displayed = self.data_grid.item(selected[0], "values")
+        old_values = tuple(
+            int(value) if column.type_text == "INT" else value
+            for column, value in zip(info.columns, displayed)
+        )
+        dialog = RowDialog(
+            self.root, info.columns, initial_values=old_values,
+            title="修改行", action_text="保存修改",
+        )
+        self.root.wait_window(dialog)
+        if dialog.result is None:
+            return
+        sql = build_update(
+            info.name, [column.name for column in info.columns],
+            dialog.result, old_values,
+        )
+        warning = "当前系统没有主键，内容完全相同的多行可能一起被修改。"
+        if messagebox.askyesno("确认修改行", f"{warning}\n\n将执行：\n{sql}", parent=self.root):
+            self._log_generated(sql)
+            self._refresh_table_after_write = info.name
+            self.execute_sql(sql)
+
     def refresh_data(self) -> None:
         if self.current_table:
             self.execute_sql(build_browse_table(self.current_table))
@@ -280,6 +310,10 @@ class MiniSQLApp:
             self._set_text(self.plan_json, json.dumps(result.optimized_plan_json, ensure_ascii=False, indent=2))
             self._append_message(f"{result.statement_type}: {result.message} ({result.elapsed_ms:.2f} ms)")
             self.status.set(result.message)
+            if self._refresh_table_after_write and result.statement_type == "UpdateStmt":
+                table = self._refresh_table_after_write
+                self._refresh_table_after_write = None
+                self.execute_sql(build_browse_table(table))
         if batch.error:
             error = batch.error
             self._append_message(f"{error.error_type} at {error.line}:{error.column}: {error.message}")

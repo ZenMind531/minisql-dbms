@@ -16,8 +16,7 @@ MiniSQL 是使用 Python 3.11 标准库实现的教学型关系数据库，面�
 - Tkinter 轻量数据库管理器，支持对象浏览、SQL 控制台、结构化结果、建表/删表、
   新增/删除行和查询计划查看。
 
-`DROP TABLE` 和 `LIMIT` 已端到端接通；`UPDATE` 已完成词法、AST、语法、语义和
-逻辑计划，尚未接通执行器。
+`DROP TABLE`、`UPDATE` 和 `LIMIT` 已端到端接通。
 `JOIN`、`GROUP BY`、事务、并发控制和索引不在当前范围。
 
 ## 2. 权威文档与优先级
@@ -89,8 +88,7 @@ SQL → Lexer → Token → Parser → AST
 - 契约冲突待评审：契约写“存储错误抛 `StorageError`”，但 `FileManager.read_page` 的越界/坏 magic 需抛 `ValueError` 才能被引擎正确包装（`tests/test_engine.py` 依赖此行为）。详见 `docs/C-review-drop-update.md` 第 4 节。
 - SHOW / ORDER BY 是已实现扩展，但冻结的三份契约尚未同步这些新增节点；若要
   把扩展接口正式冻结，需要 B、C、D 与全组评审，成员 A 不单独改契约。
-- DROP TABLE / UPDATE / LIMIT 的语义分析和计划构建已完成，DROP TABLE 与 LIMIT
-  已端到端接通；UPDATE 尚待 D 完成执行器集成。新增 AST 和计划节点仍需由 D 与
+- DROP TABLE / UPDATE / LIMIT 已端到端接通；新增 AST 和计划节点仍需由 D 与
   全组评审冻结。
 
 ## 5. 关键设计决定
@@ -129,8 +127,7 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
 ## 7. 下一步
 
 1. 用 quickstart 完成三阶段验收，并整理 T036 整组测试报告。
-2. 由 D 接入 UPDATE 的执行器，再由全组统一
-   评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
+2. 由全组统一评审 SHOW、ORDER BY 和三项新扩展的 AST/Plan 冻结契约。
 3. 完成报告与最终彩排；必做项验收前不继续扩大 SQL 范围。
 4. 成员 D 复核桌面 GUI 的结构化执行接口后，按设计文档编写测试先行的实施计划。
 
@@ -152,15 +149,16 @@ Parser、SHOW/ORDER BY 精简回归此前为 `47 passed, 24 subtests passed`。�
   Controller、Tkinter 主窗口和建表/新增行对话框；
 - GUI 通过现有 Lexer→Parser→Semantic→Planner→Optimizer→Executor 流水线执行，
   不直接修改 Catalog 或存储文件；
-- 支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`、`DROP TABLE`、`LIMIT` 和
-  SHOW/ORDER BY 的现有端到端能力；UPDATE 执行器未完成，因此修改行按钮禁用；
+- 支持 `CREATE TABLE`、`INSERT`、`SELECT`、`DELETE`、`DROP TABLE`、`UPDATE`、
+  `LIMIT` 和 SHOW/ORDER BY 的现有端到端能力；修改行对话框预填选中行并生成
+  `UPDATE ... SET ... WHERE ...`，执行后自动刷新当前表；
 - Windows 使用 `.\start_gui.ps1` 启动；
 - GUI 已统一为暗色 IDE 工作台视觉：分层深色表面、强调色运行按钮、紧凑对象树、
   无边框等宽 SQL 编辑器、斑马纹结果表和底部连接/执行状态栏；
 - 每个 SQL 控制台标签带独立关闭叉号；允许关闭最后一个控制台。有内容的控制台
   关闭前询问是否保存，确认后以 UTF-8 `.sql` 文件写入本地，取消则保留标签；
-- GUI 专项测试为 `17 passed`，完整回归为
-  `273 passed, 3 skipped, 171 subtests passed`。
+- GUI 专项测试为 `20 passed`，完整回归为
+  `292 passed, 5 skipped, 171 subtests passed`。
 
 ## 8. 维护规则
 

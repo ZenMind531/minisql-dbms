@@ -3,6 +3,7 @@ import tkinter as tk
 import pytest
 
 from database_system.gui.app import MiniSQLApp
+from database_system.gui.models import ColumnInfo, TableInfo
 
 
 class Controller:
@@ -17,6 +18,10 @@ class Controller:
     def close(self):
         pass
 
+    def execute(self, sql):
+        self.executed = sql
+        return True
+
 
 def build_app():
     try:
@@ -26,8 +31,8 @@ def build_app():
     return root, MiniSQLApp(root, controller=Controller())
 
 
-def test_gui_marks_update_as_unavailable_until_executor_supports_it() -> None:
-    assert MiniSQLApp.UPDATE_SUPPORTED is False
+def test_gui_marks_update_as_available_when_executor_supports_it() -> None:
+    assert MiniSQLApp.UPDATE_SUPPORTED is True
 
 
 def test_gui_window_builds_with_injected_controller() -> None:
@@ -80,5 +85,35 @@ def test_close_console_cancel_keeps_editor(monkeypatch) -> None:
 
         assert app.close_console(tab_id) is False
         assert app.console_tabs.tabs() == (tab_id,)
+    finally:
+        root.destroy()
+
+
+def test_update_row_generates_sql_from_selected_old_and_new_values(monkeypatch) -> None:
+    root, app = build_app()
+    try:
+        columns = (ColumnInfo("id", "INT"), ColumnInfo("name", "VARCHAR(20)"))
+        app.current_table = "student"
+        app.tables["student"] = TableInfo("student", columns)
+        app._show_rows(("id", "name"), ((1, "Alice"),))
+        item = app.data_grid.get_children()[0]
+        app.data_grid.selection_set(item)
+
+        class FakeDialog:
+            result = [2, "Bob"]
+
+            def __init__(self, parent, received_columns, **options):
+                assert received_columns == columns
+                assert options["initial_values"] == (1, "Alice")
+
+        monkeypatch.setattr("database_system.gui.app.RowDialog", FakeDialog)
+        monkeypatch.setattr(root, "wait_window", lambda _dialog: None)
+        monkeypatch.setattr("database_system.gui.app.messagebox.askyesno", lambda *a, **k: True)
+
+        app.update_row()
+
+        assert app.controller.executed == (
+            "UPDATE student SET id = 2, name = 'Bob' WHERE id = 1 AND name = 'Alice';"
+        )
     finally:
         root.destroy()
