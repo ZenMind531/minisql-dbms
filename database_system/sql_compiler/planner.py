@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 from database_system.sql_compiler.ast_nodes import (
-    Assignment, BinaryExpr, CreateTableStmt, DeleteStmt, DropTableStmt, Expr,
-    IdentifierExpr, InsertStmt, LiteralExpr, OrderByItem, SelectStmt,
-    ShowDatabasesStmt, ShowTablesStmt, Stmt, UnaryExpr, UpdateStmt,
+    AggregateExpr, Assignment, BinaryExpr, CreateTableStmt, DeleteStmt,
+    DropTableStmt, Expr, IdentifierExpr, InsertStmt, LiteralExpr, OrderByItem,
+    SelectStmt, ShowDatabasesStmt, ShowTablesStmt, Stmt, UnaryExpr, UpdateStmt,
 )
 
 
@@ -43,6 +43,15 @@ class Sort:
 @dataclass(slots=True)
 class Limit:
     count: int
+    child: "PlanNode"
+
+
+@dataclass(slots=True)
+class Aggregate:
+    """Aggregate plan node for GROUP BY and aggregate functions."""
+    group_by: list[str]
+    aggregates: list[tuple[str, AggregateExpr]]
+    having: Expr | None
     child: "PlanNode"
 
 
@@ -88,8 +97,8 @@ class Insert:
 
 
 PlanNode: TypeAlias = (
-    SeqScan | Filter | Project | Sort | Limit | Delete | DropTable | Update
-    | CreateTable | Insert | ShowDatabases | ShowTables
+    SeqScan | Filter | Project | Sort | Limit | Aggregate | Delete | DropTable
+    | Update | CreateTable | Insert | ShowDatabases | ShowTables
 )
 
 
@@ -112,10 +121,21 @@ class Planner:
                 child = Filter(stmt.where, SeqScan(stmt.table))
             return Update(stmt.table, list(stmt.assignments), child)
         if isinstance(stmt, SelectStmt):
-            # Build plan: Limit → Project → Sort → Filter → SeqScan
+            # Build plan: Limit → Project → Sort → Aggregate → Filter → SeqScan
             child: PlanNode = SeqScan(stmt.table)
             if stmt.where is not None:
                 child = Filter(stmt.where, child)
+
+            select_exprs = stmt.select_exprs
+            if self._has_aggregates(select_exprs) or stmt.group_by:
+                aggregates = self._extract_aggregates(stmt.columns, select_exprs)
+                child = Aggregate(
+                    group_by=list(stmt.group_by),
+                    aggregates=aggregates,
+                    having=stmt.having,
+                    child=child,
+                )
+
             if stmt.order_by:
                 child = Sort(list(stmt.order_by), child)
             child = Project(stmt.columns, child)
@@ -132,6 +152,24 @@ class Planner:
         if isinstance(stmt, ShowTablesStmt):
             return ShowTables()
         raise TypeError(f"unsupported statement type: {type(stmt).__name__}")
+
+    @staticmethod
+    def _has_aggregates(select_exprs: list[Expr]) -> bool:
+        """Check if SELECT list contains aggregate functions."""
+        return any(isinstance(expr, AggregateExpr) for expr in select_exprs)
+
+    @staticmethod
+    def _extract_aggregates(columns: list[str] | None, select_exprs: list[Expr]) -> list[tuple[str, AggregateExpr]]:
+        """Extract aggregate functions from SELECT list."""
+        if columns is None:
+            return []
+
+        aggregates = []
+        for i, expr in enumerate(select_exprs):
+            if isinstance(expr, AggregateExpr):
+                col_name = columns[i] if i < len(columns) else f"agg_{i}"
+                aggregates.append((col_name, expr))
+        return aggregates
 
 
 def _expression_json(expr: Expr) -> dict[str, Any]:
@@ -152,6 +190,15 @@ def _expression_json(expr: Expr) -> dict[str, Any]:
             "left": _expression_json(expr.left),
             "right": _expression_json(expr.right),
         }
+    if isinstance(expr, AggregateExpr):
+        result = {
+            "type": "AggregateExpr",
+            "function": expr.function.value,
+            "is_distinct": expr.is_distinct,
+        }
+        if expr.argument is not None:
+            result["argument"] = _expression_json(expr.argument)
+        return result
     raise TypeError(f"unsupported expression type: {type(expr).__name__}")
 
 
@@ -208,6 +255,19 @@ def plan_to_json(plan: PlanNode) -> dict[str, Any]:
             "count": plan.count,
             "child": plan_to_json(plan.child),
         }
+    if isinstance(plan, Aggregate):
+        result = {
+            "type": "Aggregate",
+            "group_by": list(plan.group_by),
+            "aggregates": [
+                {"column": col_name, "function": _expression_json(agg_expr)}
+                for col_name, agg_expr in plan.aggregates
+            ],
+            "child": plan_to_json(plan.child),
+        }
+        if plan.having is not None:
+            result["having"] = _expression_json(plan.having)
+        return result
     if isinstance(plan, ShowDatabases):
         return {"type": "ShowDatabases"}
     if isinstance(plan, ShowTables):
@@ -262,6 +322,12 @@ def _expression_text(expr: Expr) -> str:
         return f"{expr.op.value}{_expression_text(expr.operand)}"
     if isinstance(expr, BinaryExpr):
         return f"{_expression_text(expr.left)} {expr.op.value} {_expression_text(expr.right)}"
+    if isinstance(expr, AggregateExpr):
+        func = expr.function.value
+        distinct = "DISTINCT " if expr.is_distinct else ""
+        if expr.argument is None:
+            return f"{func}(*)"
+        return f"{func}({distinct}{_expression_text(expr.argument)})"
     raise TypeError(f"unsupported expression type: {type(expr).__name__}")
 
 
@@ -281,6 +347,14 @@ def _node_label(plan: PlanNode) -> str:
         return f"Sort({items})"
     if isinstance(plan, Limit):
         return f"Limit({plan.count})"
+    if isinstance(plan, Aggregate):
+        aggs = ", ".join(
+            f"{col}={_expression_text(expr)}"
+            for col, expr in plan.aggregates
+        )
+        group = ", ".join(plan.group_by) if plan.group_by else "no grouping"
+        having_text = f", HAVING {_expression_text(plan.having)}" if plan.having else ""
+        return f"Aggregate(group_by=[{group}], aggs=[{aggs}]{having_text})"
     if isinstance(plan, ShowDatabases):
         return "ShowDatabases"
     if isinstance(plan, ShowTables):
@@ -309,7 +383,7 @@ def _node_label(plan: PlanNode) -> str:
 
 
 def _child(plan: PlanNode) -> PlanNode | None:
-    if isinstance(plan, (Filter, Project, Sort, Limit, Delete)):
+    if isinstance(plan, (Filter, Project, Sort, Limit, Aggregate, Delete)):
         return plan.child
     if isinstance(plan, Update):
         return plan.child
@@ -339,7 +413,7 @@ def plan_to_tree(plan: PlanNode) -> str:
 
 
 __all__ = [
-    "CreateTable", "Delete", "DropTable", "Filter", "Insert", "Limit",
-    "PlanNode", "Planner", "Project", "SeqScan", "ShowDatabases", "ShowTables",
-    "Sort", "Update", "plan_to_json", "plan_to_tree",
+    "Aggregate", "CreateTable", "Delete", "DropTable", "Filter", "Insert",
+    "Limit", "PlanNode", "Planner", "Project", "SeqScan", "ShowDatabases",
+    "ShowTables", "Sort", "Update", "plan_to_json", "plan_to_tree",
 ]

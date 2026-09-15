@@ -42,8 +42,8 @@ from database_system.sql_compiler.ast_nodes import (
     TypeSpec, UnaryExpr, UnaryOperator,
 )
 from database_system.sql_compiler.planner import (
-    CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode, Project,
-    SeqScan, ShowDatabases, ShowTables, Sort, Update,
+    Aggregate, CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode,
+    Project, SeqScan, ShowDatabases, ShowTables, Sort, Update,
 )
 
 
@@ -133,6 +133,10 @@ class Optimizer:
             return Sort(list(plan.items), self._optimize_plan(plan.child))
         if isinstance(plan, Limit):
             return Limit(plan.count, self._optimize_plan(plan.child))
+        if isinstance(plan, Aggregate):
+            child = self._optimize_plan(plan.child)
+            having = self._fold_expression(plan.having) if plan.having is not None else None
+            return Aggregate(list(plan.group_by), list(plan.aggregates), having, child)
         if isinstance(plan, Delete):
             return Delete(plan.table, self._optimize_plan(plan.child))
         if isinstance(plan, Update):

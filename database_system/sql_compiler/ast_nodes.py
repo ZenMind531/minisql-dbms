@@ -48,6 +48,15 @@ class BinaryOperator(StrEnum):
     OR = "OR"
 
 
+class AggregateFunction(StrEnum):
+    """Supported aggregate functions."""
+    COUNT = "COUNT"
+    SUM = "SUM"
+    AVG = "AVG"
+    MIN = "MIN"
+    MAX = "MAX"
+
+
 @dataclass(frozen=True, slots=True)
 class TypeSpec:
     kind: TypeKind
@@ -111,6 +120,14 @@ class BinaryExpr(Expr):
     op: BinaryOperator
     left: Expr
     right: Expr
+
+
+@dataclass(slots=True, kw_only=True)
+class AggregateExpr(Expr):
+    """Aggregate function expression like COUNT(*) or SUM(age)."""
+    function: AggregateFunction
+    argument: Expr | None  # None for COUNT(*)
+    is_distinct: bool = False  # For COUNT(DISTINCT column)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -178,6 +195,9 @@ class SelectStmt(ASTNode):
     where: Expr | None
     order_by: list[OrderByItem] = field(default_factory=list)
     limit: LimitClause | None = None
+    group_by: list[str] = field(default_factory=list)
+    having: Expr | None = None
+    select_exprs: list[Expr] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         ASTNode.__post_init__(self)
@@ -227,6 +247,8 @@ Stmt: TypeAlias = (
 
 __all__ = [
     "ASTNode",
+    "AggregateExpr",
+    "AggregateFunction",
     "Assignment",
     "BinaryExpr",
     "BinaryOperator",

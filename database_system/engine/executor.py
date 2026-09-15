@@ -22,13 +22,13 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, TypeAlias
 
 from database_system.engine.storage_engine import StorageEngine
 from database_system.sql_compiler.ast_nodes import (
-    BinaryExpr, BinaryOperator, Expr, IdentifierExpr, LiteralExpr, UnaryExpr,
-    UnaryOperator,
+    AggregateExpr, AggregateFunction, BinaryExpr, BinaryOperator, Expr,
+    IdentifierExpr, LiteralExpr, UnaryExpr, UnaryOperator,
 )
 from database_system.sql_compiler.catalog import Catalog, TableSchema
 from database_system.sql_compiler.planner import (
-    CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode, Project,
-    SeqScan, ShowDatabases, ShowTables, Sort, Update,
+    Aggregate, CreateTable, Delete, DropTable, Filter, Insert, Limit, PlanNode,
+    Project, SeqScan, ShowDatabases, ShowTables, Sort, Update,
 )
 from database_system.utils.errors import ExecError
 
@@ -71,8 +71,12 @@ def _place(values: list, positions: list[int] | None, width: int) -> tuple:
     return tuple(row)
 
 
-def _evaluate(expr: Expr, row: tuple | None, index: dict[str, int]) -> Any:
-    """按行求值一个表达式；INSERT 的 VALUES 没有源行，此时 row 为 None。"""
+def _evaluate(expr: Expr, row: tuple | None, index: dict[str, int],
+              allow_aggregate: bool = False) -> Any:
+    """按行求值一个表达式；INSERT 的 VALUES 没有源行，此时 row 为 None。
+
+    allow_aggregate=True 时允许聚合表达式（用于 HAVING 子句）。
+    """
     if isinstance(expr, LiteralExpr):
         return expr.value
     if isinstance(expr, IdentifierExpr):
@@ -81,31 +85,41 @@ def _evaluate(expr: Expr, row: tuple | None, index: dict[str, int]) -> Any:
                             line=expr.line, column=expr.column)
         return row[index[expr.name]]
     if isinstance(expr, UnaryExpr):
-        value = _evaluate(expr.operand, row, index)
+        value = _evaluate(expr.operand, row, index, allow_aggregate)
         if expr.op is UnaryOperator.NOT:
             return not value
         if expr.op is UnaryOperator.MINUS:
             return -value
         return value
     if isinstance(expr, BinaryExpr):
-        return _evaluate_binary(expr, row, index)
+        return _evaluate_binary(expr, row, index, allow_aggregate)
+    if isinstance(expr, AggregateExpr):
+        # 在 HAVING 子句中，聚合表达式已经被计算并存储在结果行中
+        # 这里不应该再次遇到 AggregateExpr，而是应该通过 IdentifierExpr 引用
+        if allow_aggregate:
+            # 如果允许聚合表达式，说明是在 HAVING 求值中，
+            # 但此时聚合结果已经在 result_row 中，应该通过列名引用
+            raise ExecError(f"内部错误：HAVING 中的聚合表达式应该已被替换为列引用",
+                            line=expr.line, column=expr.column)
+        raise ExecError(f"聚合函数 {expr.function} 不能在此处使用",
+                        line=expr.line, column=expr.column)
     raise ExecError(f"不支持的表达式: {type(expr).__name__}",
                     line=expr.line, column=expr.column)
 
 
 def _evaluate_binary(expr: BinaryExpr, row: tuple | None,
-                     index: dict[str, int]) -> Any:
+                     index: dict[str, int], allow_aggregate: bool = False) -> Any:
     op = expr.op
     # AND / OR 短路求值：右边不一定要算
     if op is BinaryOperator.AND:
-        return (bool(_evaluate(expr.left, row, index))
-                and bool(_evaluate(expr.right, row, index)))
+        return (bool(_evaluate(expr.left, row, index, allow_aggregate))
+                and bool(_evaluate(expr.right, row, index, allow_aggregate)))
     if op is BinaryOperator.OR:
-        return (bool(_evaluate(expr.left, row, index))
-                or bool(_evaluate(expr.right, row, index)))
+        return (bool(_evaluate(expr.left, row, index, allow_aggregate))
+                or bool(_evaluate(expr.right, row, index, allow_aggregate)))
 
-    left = _evaluate(expr.left, row, index)
-    right = _evaluate(expr.right, row, index)
+    left = _evaluate(expr.left, row, index, allow_aggregate)
+    right = _evaluate(expr.right, row, index, allow_aggregate)
     if op is BinaryOperator.DIVIDE:
         if right == 0:
             raise ExecError("除数为零", line=expr.line, column=expr.column)
@@ -120,7 +134,10 @@ def _evaluate_binary(expr: BinaryExpr, row: tuple | None,
 def _base_table(plan: PlanNode) -> str:
     """顺着 child 往下找到 SeqScan，取出这次查询的表名。"""
     while not isinstance(plan, SeqScan):
-        plan = plan.child
+        if isinstance(plan, Aggregate):
+            plan = plan.child
+        else:
+            plan = plan.child
     return plan.table
 
 
@@ -151,7 +168,7 @@ class Executor:
             return [(self.engine.data_dir.name or str(self.engine.data_dir),)]
         if isinstance(plan, ShowTables):
             return [(name,) for name in self.catalog.table_names(include_system=False)]
-        if isinstance(plan, (SeqScan, Filter, Project, Sort, Limit)):
+        if isinstance(plan, (SeqScan, Filter, Project, Sort, Limit, Aggregate)):
             return self._select(plan)
         # 兜底：前端若新增了计划节点而这里还没接，必须干净报错而不是崩掉
         # REPL。不能默认丢给 _select：那里要顺着 child 找 SeqScan，而这类
@@ -239,9 +256,14 @@ class Executor:
             if plan.columns is None:  # SELECT *
                 yield from self._run(plan.child, index)
             else:
-                wanted = [index[name] for name in plan.columns]
-                for row in self._run(plan.child, index):
-                    yield tuple(row[position] for position in wanted)
+                # 对于聚合查询，Aggregate 节点已经输出了正确的列
+                # Project 只需要按顺序输出，不需要再从 index 查找
+                if isinstance(plan.child, Aggregate):
+                    yield from self._run(plan.child, index)
+                else:
+                    wanted = [index[name] for name in plan.columns]
+                    for row in self._run(plan.child, index):
+                        yield tuple(row[position] for position in wanted)
         elif isinstance(plan, Sort):
             rows = list(self._run(plan.child, index))
             for item in reversed(plan.items):
@@ -253,8 +275,141 @@ class Executor:
         elif isinstance(plan, Limit):
             # islice 是惰性的：取够 count 行就不再往下要，不会白扫全表
             yield from islice(self._run(plan.child, index), plan.count)
+        elif isinstance(plan, Aggregate):
+            yield from self._aggregate(plan, index)
         else:
             raise ExecError(f"不支持的查询计划: {type(plan).__name__}")
+
+    # ---------- 工具 ----------
+    def _aggregate(self, plan: Aggregate, index: dict[str, int]) -> Iterator[tuple]:
+        """执行聚合操作：GROUP BY + 聚合函数 + HAVING。"""
+        # 1. 读取子计划的所有行
+        rows = list(self._run(plan.child, index))
+
+        # 2. 按 GROUP BY 列分组
+        if plan.group_by:
+            # 有 GROUP BY：按指定列分组
+            groups: dict[tuple, list[tuple]] = {}
+            group_indices = [index[col] for col in plan.group_by]
+            for row in rows:
+                key = tuple(row[i] for i in group_indices)
+                groups.setdefault(key, []).append(row)
+        else:
+            # 无 GROUP BY：所有行作为一组
+            groups = {(): rows}
+
+        # 3. 对每组计算聚合函数
+        for group_key, group_rows in groups.items():
+            # 计算所有聚合表达式
+            agg_values = []
+            for col_name, agg_expr in plan.aggregates:
+                value = self._compute_aggregate(agg_expr, group_rows, index)
+                agg_values.append(value)
+
+            # 构建结果行：GROUP BY 列 + 聚合结果
+            result_row = group_key + tuple(agg_values)
+
+            # 4. 应用 HAVING 过滤
+            if plan.having is not None:
+                # 构建临时索引：GROUP BY 列 + 聚合列
+                temp_index = {col: i for i, col in enumerate(plan.group_by)}
+                for i, (col_name, _) in enumerate(plan.aggregates):
+                    temp_index[col_name] = len(plan.group_by) + i
+
+                # 求值 HAVING，在临时环境中重新计算聚合
+                if not self._evaluate_having(plan.having, result_row, temp_index, group_rows, index):
+                    continue
+
+            yield result_row
+
+    def _evaluate_having(self, expr: Expr, row: tuple, index: dict[str, int],
+                         group_rows: list[tuple], original_index: dict[str, int]) -> bool:
+        """求值 HAVING 表达式，遇到聚合表达式时重新计算。"""
+        if isinstance(expr, AggregateExpr):
+            # 对当前组重新计算聚合
+            return self._compute_aggregate(expr, group_rows, original_index)
+        if isinstance(expr, IdentifierExpr):
+            # 列引用：从结果行中获取
+            return row[index[expr.name]]
+        if isinstance(expr, LiteralExpr):
+            return expr.value
+        if isinstance(expr, BinaryExpr):
+            op = expr.op
+            if op is BinaryOperator.AND:
+                return (self._evaluate_having(expr.left, row, index, group_rows, original_index)
+                        and self._evaluate_having(expr.right, row, index, group_rows, original_index))
+            if op is BinaryOperator.OR:
+                return (self._evaluate_having(expr.left, row, index, group_rows, original_index)
+                        or self._evaluate_having(expr.right, row, index, group_rows, original_index))
+
+            left = self._evaluate_having(expr.left, row, index, group_rows, original_index)
+            right = self._evaluate_having(expr.right, row, index, group_rows, original_index)
+
+            if op is BinaryOperator.DIVIDE:
+                if right == 0:
+                    raise ExecError("除数为零", line=expr.line, column=expr.column)
+                return int(left / right)
+
+            handler = _COMPARISON.get(op)
+            if handler:
+                return handler(left, right)
+            handler = _ARITHMETIC.get(op)
+            if handler:
+                return handler(left, right)
+            raise ExecError(f"不支持的运算符: {op}", line=expr.line, column=expr.column)
+        if isinstance(expr, UnaryExpr):
+            value = self._evaluate_having(expr.operand, row, index, group_rows, original_index)
+            if expr.op is UnaryOperator.NOT:
+                return not value
+            if expr.op is UnaryOperator.MINUS:
+                return -value
+            return value
+        raise ExecError(f"不支持的表达式: {type(expr).__name__}",
+                        line=expr.line, column=expr.column)
+
+    def _compute_aggregate(
+        self, agg_expr: AggregateExpr, rows: list[tuple], index: dict[str, int]
+    ) -> Any:
+        """计算单个聚合函数的值。"""
+        func = agg_expr.function
+
+        # COUNT(*)
+        if func is AggregateFunction.COUNT and agg_expr.argument is None:
+            return len(rows)
+
+        # 其他聚合函数需要提取列值
+        values = []
+        for row in rows:
+            value = _evaluate(agg_expr.argument, row, index)
+            values.append(value)
+
+        # COUNT(DISTINCT column)
+        if func is AggregateFunction.COUNT:
+            if agg_expr.is_distinct:
+                return len(set(values))
+            return len(values)
+
+        # 空组处理
+        if not values:
+            return None
+
+        # SUM
+        if func is AggregateFunction.SUM:
+            return sum(values)
+
+        # AVG (整数除法)
+        if func is AggregateFunction.AVG:
+            return sum(values) // len(values)
+
+        # MIN
+        if func is AggregateFunction.MIN:
+            return min(values)
+
+        # MAX
+        if func is AggregateFunction.MAX:
+            return max(values)
+
+        raise ExecError(f"不支持的聚合函数: {func}")
 
     # ---------- 工具 ----------
     @staticmethod

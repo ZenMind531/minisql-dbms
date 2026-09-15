@@ -6,10 +6,11 @@ keyed by column name; AST column names themselves remain unchanged.
 """
 
 from database_system.sql_compiler.ast_nodes import (
-    ASTNode, Assignment, BinaryExpr, BinaryOperator, ColumnDef, CreateTableStmt,
-    DeleteStmt, DropTableStmt, Expr, IdentifierExpr, InsertStmt, LiteralExpr,
-    LiteralKind, SelectStmt, ShowDatabasesStmt, ShowTablesStmt, Stmt, TypeKind,
-    TypeSpec, UnaryExpr, UnaryOperator, UpdateStmt,
+    ASTNode, AggregateExpr, AggregateFunction, Assignment, BinaryExpr,
+    BinaryOperator, ColumnDef, CreateTableStmt, DeleteStmt, DropTableStmt, Expr,
+    IdentifierExpr, InsertStmt, LiteralExpr, LiteralKind, SelectStmt,
+    ShowDatabasesStmt, ShowTablesStmt, Stmt, TypeKind, TypeSpec, UnaryExpr,
+    UnaryOperator, UpdateStmt,
 )
 from database_system.sql_compiler.catalog import Catalog
 from database_system.utils.errors import SemanticError
@@ -74,18 +75,102 @@ class SemanticAnalyzer:
             self._insert(stmt, schema.columns)
         elif isinstance(stmt, UpdateStmt):
             self._update(stmt, schema.columns)
-        else:
-            if isinstance(stmt, SelectStmt):
-                names = stmt.columns if stmt.columns is not None else [c.name for c in schema.columns]
-                for name in names:
-                    self._bind(stmt.table, name, stmt)
-                for item in stmt.order_by:
-                    self._bind(stmt.table, item.column_name, item)
+        elif isinstance(stmt, SelectStmt):
+            self._select(stmt, schema.columns)
+        elif isinstance(stmt, DeleteStmt):
             if stmt.where is not None:
                 result = self._expression(stmt.where, stmt.table)
                 if result.kind is not TypeKind.BOOL:
                     raise self._error(stmt.where, "WHERE expression must have BOOL type")
         return stmt
+
+    def _select(self, stmt: SelectStmt, schema_columns: list[ColumnDef]) -> None:
+        """Validate SELECT statement with aggregate function support."""
+        select_exprs = stmt.select_exprs
+        has_aggregate = self._has_aggregates_in_select(select_exprs)
+
+        if stmt.columns is None:
+            for col in schema_columns:
+                self.column_bindings[col.name] = col
+        else:
+            for i, col_name in enumerate(stmt.columns):
+                if i < len(select_exprs) and isinstance(select_exprs[i], AggregateExpr):
+                    continue
+                self._bind(stmt.table, col_name, stmt)
+
+        for item in stmt.order_by:
+            self._bind(stmt.table, item.column_name, item)
+
+        for expr in select_exprs:
+            if isinstance(expr, AggregateExpr):
+                self._validate_aggregate(expr, stmt.table)
+            else:
+                self._expression(expr, stmt.table)
+
+        if has_aggregate or stmt.group_by or stmt.having is not None:
+            for col_name in stmt.group_by:
+                self._bind(stmt.table, col_name, stmt)
+
+            if stmt.columns is not None:
+                for i, col_name in enumerate(stmt.columns):
+                    if i >= len(select_exprs):
+                        continue
+                    expr = select_exprs[i]
+                    if isinstance(expr, IdentifierExpr):
+                        if col_name not in stmt.group_by:
+                            raise self._error(expr, f"column '{col_name}' must appear in GROUP BY or be in aggregate function")
+
+        if stmt.where is not None:
+            if self._contains_aggregate_expr(stmt.where):
+                raise self._error(stmt.where, "WHERE clause cannot contain aggregate functions; use HAVING instead")
+            result = self._expression(stmt.where, stmt.table)
+            if result.kind is not TypeKind.BOOL:
+                raise self._error(stmt.where, "WHERE expression must have BOOL type")
+
+        if stmt.having is not None:
+            if not has_aggregate and not stmt.group_by:
+                raise self._error(stmt.having, "HAVING clause requires GROUP BY or aggregate functions in SELECT")
+            result = self._expression(stmt.having, stmt.table)
+            if result.kind is not TypeKind.BOOL:
+                raise self._error(stmt.having, "HAVING expression must have BOOL type")
+
+    def _validate_aggregate(self, expr: AggregateExpr, table: str) -> TypeSpec:
+        """Validate aggregate function and return its result type."""
+        if expr.argument is None:
+            if expr.function is not AggregateFunction.COUNT:
+                raise self._error(expr, f"{expr.function.value}(*) is not valid; only COUNT(*) accepts *")
+            expr.resolved_type = TypeSpec(TypeKind.INT)
+            return expr.resolved_type
+
+        arg_type = self._expression(expr.argument, table)
+
+        if expr.function is AggregateFunction.COUNT:
+            result = TypeSpec(TypeKind.INT)
+        elif expr.function in (AggregateFunction.SUM, AggregateFunction.AVG):
+            if arg_type.kind is not TypeKind.INT:
+                raise self._error(expr, f"{expr.function.value} requires INT argument, got {arg_type.kind}")
+            result = TypeSpec(TypeKind.INT)
+        elif expr.function in (AggregateFunction.MIN, AggregateFunction.MAX):
+            result = arg_type
+        else:
+            raise self._error(expr, f"unknown aggregate function: {expr.function}")
+
+        expr.resolved_type = result
+        return result
+
+    def _has_aggregates_in_select(self, select_exprs: list[Expr]) -> bool:
+        """Check if SELECT list contains any aggregate functions."""
+        return any(isinstance(expr, AggregateExpr) for expr in select_exprs)
+
+    def _contains_aggregate_expr(self, expr: Expr) -> bool:
+        """Recursively check if expression contains aggregate functions."""
+        if isinstance(expr, AggregateExpr):
+            return True
+        if isinstance(expr, UnaryExpr):
+            return self._contains_aggregate_expr(expr.operand)
+        if isinstance(expr, BinaryExpr):
+            return self._contains_aggregate_expr(expr.left) or self._contains_aggregate_expr(expr.right)
+        return False
 
     def _drop_table(self, stmt: DropTableStmt) -> DropTableStmt:
         """Validate DROP TABLE statement."""
@@ -178,6 +263,8 @@ class SemanticAnalyzer:
             if kind is None:
                 raise self._error(expr, f"operator {expr.op} does not accept {left.kind} and {right.kind}")
             result = TypeSpec(kind)
+        elif isinstance(expr, AggregateExpr):
+            result = self._validate_aggregate(expr, table)
         else:
             raise self._error(expr, f"unsupported expression: {type(expr).__name__}")
         expr.resolved_type = result

@@ -33,6 +33,14 @@ KEYWORDS = frozenset(
         "UPDATE",
         "SET",
         "LIMIT",
+        "GROUP",
+        "HAVING",
+        "COUNT",
+        "SUM",
+        "AVG",
+        "MIN",
+        "MAX",
+        "DISTINCT",
     }
 )
 

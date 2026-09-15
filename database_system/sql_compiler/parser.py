@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection
 
 from database_system.sql_compiler.ast_nodes import (
+    AggregateExpr,
+    AggregateFunction,
     Assignment,
     BinaryExpr,
     BinaryOperator,
@@ -200,15 +202,23 @@ class Parser:
 
     def _parse_select(self) -> SelectStmt:
         start = self._consume_keyword("SELECT")
-        if self._match_lexeme("*"):
-            columns = None
-        else:
-            columns = self._parse_identifier_list()
+        columns, select_exprs = self._parse_select_list()
         self._consume_keyword("FROM")
         table = self._consume_identifier()
         where = self._parse_expression() if self._match_keyword("WHERE") else None
+
+        group_by = []
+        if self._match_keyword("GROUP"):
+            self._consume_keyword("BY")
+            group_by = self._parse_identifier_list()
+
+        having = None
+        if self._match_keyword("HAVING"):
+            having = self._parse_expression()
+
         order_by = self._parse_order_by() if self._match_keyword("ORDER") else []
         limit = self._parse_limit() if self._is_keyword("LIMIT") else None
+
         return SelectStmt(
             line=start.line,
             column=start.column,
@@ -217,6 +227,94 @@ class Parser:
             where=where,
             order_by=order_by,
             limit=limit,
+            group_by=group_by,
+            having=having,
+            select_exprs=select_exprs,
+        )
+
+    def _parse_select_list(self) -> tuple[list[str] | None, list[Expr]]:
+        """Parse SELECT column list, returning (column_names, select_expressions).
+
+        Returns:
+            (None, []) for SELECT *
+            ([col1, col2], [expr1, expr2]) for explicit columns/aggregates
+        """
+        if self._match_lexeme("*"):
+            return (None, [])
+
+        items = [self._parse_select_item()]
+        while self._match_lexeme(","):
+            items.append(self._parse_select_item())
+
+        columns = []
+        select_exprs = []
+        for name, expr in items:
+            columns.append(name)
+            select_exprs.append(expr)
+
+        return (columns, select_exprs)
+
+    def _parse_select_item(self) -> tuple[str, Expr]:
+        """Parse one SELECT item, returning (column_name, expression)."""
+        token = self._current()
+
+        if self._is_aggregate_function():
+            expr = self._parse_aggregate_function()
+            func_name = expr.function.value.lower()
+            if expr.argument is None:
+                col_name = f"{func_name}_star"
+            elif isinstance(expr.argument, IdentifierExpr):
+                col_name = f"{func_name}_{expr.argument.name}"
+            else:
+                col_name = f"{func_name}_expr"
+            return (col_name, expr)
+
+        if token.type is TokenType.IDENTIFIER:
+            col_name = token.lexeme
+            expr = IdentifierExpr(
+                line=token.line,
+                column=token.column,
+                name=col_name,
+            )
+            self._advance()
+            return (col_name, expr)
+
+        raise self._error(token, {"column name or aggregate function"})
+
+    def _is_aggregate_function(self) -> bool:
+        """Check if current token is an aggregate function keyword."""
+        token = self._current()
+        if token.type is not TokenType.KEYWORD:
+            return False
+        return token.lexeme.upper() in ("COUNT", "SUM", "AVG", "MIN", "MAX")
+
+    def _parse_aggregate_function(self) -> AggregateExpr:
+        """Parse COUNT(*) / SUM(column) / COUNT(DISTINCT column)."""
+        func_token = self._advance()
+        func_name = func_token.lexeme.upper()
+
+        try:
+            func = AggregateFunction[func_name]
+        except KeyError:
+            raise self._error(func_token, {"COUNT", "SUM", "AVG", "MIN", "MAX"})
+
+        self._consume_lexeme("(", {"("})
+
+        if func is AggregateFunction.COUNT and self._match_lexeme("*"):
+            argument = None
+            is_distinct = False
+        else:
+            is_distinct = self._match_keyword("DISTINCT")
+            argument = self._parse_expression()
+
+        self._consume_lexeme(")", {")"})
+
+        return AggregateExpr(
+            line=func_token.line,
+            column=func_token.column,
+            function=func,
+            argument=argument,
+            is_distinct=is_distinct,
         )
 
     def _parse_order_by(self) -> list[OrderByItem]:
@@ -356,6 +454,10 @@ class Parser:
 
     def _parse_primary_expression(self) -> Expr:
         token = self._current()
+
+        if self._is_aggregate_function():
+            return self._parse_aggregate_function()
+
         if token.type is TokenType.IDENTIFIER:
             self._advance()
             return IdentifierExpr(
